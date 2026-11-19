@@ -1,0 +1,15 @@
+{
+  "name": "favorite-order-server",
+  "version": "1.0.0",
+  "description": "Node + SQLite backend for Favorite Order App",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  }
+}

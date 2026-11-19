@@ -47,7 +47,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Must use Ionic as the UI framework.
 - Must be designed mobile first.
 - Must use Vue with Ionic Vue.
-- Must use Supabase as the backend.
+- Must use a Node.js server with a SQLite database as the backend.
 - No third-party places/restaurant API.
 - Sharing is limited to accepted friends.
 
@@ -67,7 +67,11 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - UI framework: Ionic (mobile-first components and navigation).
 - Frontend: Vue (Ionic Vue) with TypeScript.
 - Native layer: Capacitor for iOS and Android builds, plus a PWA.
-- Backend: Supabase (Postgres, Auth, Realtime), with row-level security so users only see their own orders and orders shared with them by friends.
+- Backend: Node.js HTTP/JSON API server (`server/`) using the built-in `node:http` and `node:sqlite` modules (Node 22.13+), with no external runtime dependencies.
+- Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants, orders, friendships, and order shares.
+- Auth: email/password accounts with scrypt-hashed passwords; sign-in returns a bearer token stored by the client and sent in the `Authorization` header.
+- Access control: enforced in the API so users only see their own restaurants and orders plus orders shared with them by accepted friends; shared orders are read-only for recipients.
+- Client configuration: the app reaches the API at `VITE_API_URL` (default `http://localhost:3000`).
 - Privacy: orders are private by default; sharing creates an explicit share record.
 - Friends: a friends table with pending/accepted status gates sharing.
 - Restaurants: free-text entry by users, with no external API; different spellings are kept as separate entries and restaurants persist independently of their orders.
