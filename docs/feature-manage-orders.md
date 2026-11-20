@@ -236,8 +236,8 @@ Tracks progress of each implementation step. Update this section whenever a step
 
 | Step | Title | Status |
 |------|-------|--------|
-| 1 | Structured order data and API | Partial |
-| 2 | Add an order with items and customizations | Partial |
+| 1 | Structured order data and API | Complete |
+| 2 | Add an order with items and customizations | Complete |
 | 3 | Restaurant ownership and auto-fill | Not started |
 | 4 | Toppings auto-fill | Not started |
 | 5 | View orders, order detail and default order | Partial |
@@ -247,8 +247,8 @@ Tracks progress of each implementation step. Update this section whenever a step
 | 9 | Polish and cross-platform check | Not started |
 
 ### Details
-- **Step 1: Partial.** Done: order create, read, update and delete endpoints scoped to the owner, default-order promotion on delete, and `updatedAt` bumped on edit. Remaining: structured items (quantity, default 1) and remove/add/substitute customizations in their own tables (items are currently a JSON text list and customizations a single text field), rejecting an order with no items or a quantity below 1, rejecting a restaurant change on update, and the matching tests.
-- **Step 2: Partial.** Done: add-order page, saving at a new or existing restaurant by typed name without duplicates. Remaining: item list with quantity and per-item customizations in the form, blocking save without items, optional order name and notes handling in the form, and long-text limits.
+- **Step 1: Complete.** Items (`order_items`, quantity default 1) and customizations (`order_item_customizations`: remove/add/substitute) are stored in their own tables. Old JSON items are migrated on startup, and old customization text is appended to notes. The server rejects an order with no items, a quantity below 1, invalid customizations, over-long text and a restaurant change on update. It ignores any owner id sent by the client. Covered by server tests.
+- **Step 2: Complete.** The add-order form has an item list with a quantity stepper (starts at 1) and per-item remove/add/substitute customizations, plus an optional name and notes. Saving without items is blocked with a message, inputs have length limits, and long text wraps. Covered by client tests.
 - **Step 3: Not started.** Restaurants only have a user owner today. There is no administrator-owned restaurant support, no auto-fill, and no suggestion endpoint.
 - **Step 4: Not started.** There is no toppings list, endpoint or autocomplete.
 - **Step 5: Partial.** Done: the restaurant orders page lists orders and shows a Default badge, and the server supports marking a default. Remaining: order detail view with share action hook, a client action to change the default, and the fallback for no default on the orders page.

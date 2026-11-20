@@ -40,7 +40,7 @@
           <ion-label class="ion-text-wrap">
             <h2>{{ order.title || 'Order' }}</h2>
             <p data-testid="order-items">
-              {{ order.items.join(', ') }}
+              {{ order.items.map(formatItem).join(', ') }}
             </p>
             <p v-if="order.notes">
               {{ order.notes }}
@@ -95,7 +95,7 @@ import {
 } from '@ionic/vue';
 import { add } from 'ionicons/icons';
 import { useRoute, useRouter } from 'vue-router';
-import { fetchRestaurant, fetchRestaurantOrders, type Order, type Restaurant } from '@/services/restaurants';
+import { fetchRestaurant, fetchRestaurantOrders, formatItem, type Order, type Restaurant } from '@/services/restaurants';
 
 const props = defineProps<{ id?: string }>();
 const route = useRoute();
@@ -122,7 +122,7 @@ async function load() {
 }
 
 function addOrder() {
-  router.push({ path: '/tabs/restaurants/new-order', query: { restaurant: restaurant.value?.name ?? '' } });
+  router.push({ path: '/tabs/restaurants/new-order', query: { restaurantId, restaurant: restaurant.value?.name ?? '' } });
 }
 
 onIonViewWillEnter(load);

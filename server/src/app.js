@@ -25,14 +25,27 @@ function publicUser(u) {
   return { id: u.id, email: u.email, phone: u.phone, displayName: u.display_name };
 }
 
-function orderDto(o) {
+export const LIMITS = { restaurantName: 100, title: 100, itemName: 100, ingredient: 60, notes: 1000 };
+const CUSTOMIZATION_KINDS = ['remove', 'add', 'substitute'];
+
+// Common toppings offered as auto-fill for customizations, alongside the user's own past ingredients.
+export const COMMON_TOPPINGS = [
+  'Avocado', 'Bacon', 'BBQ Sauce', 'Cheese', 'Cilantro', 'Cucumber', 'Extra Cheese', 'Guacamole',
+  'Hot Sauce', 'Jalapeños', 'Ketchup', 'Lettuce', 'Mayonnaise', 'Mushrooms', 'Mustard', 'Olives',
+  'Onions', 'Pickles', 'Ranch', 'Salsa', 'Sour Cream', 'Spinach', 'Tomato',
+];
+
+function restaurantDto(r) {
+  return { id: r.id, name: r.name, adminOwned: r.owner_id === null, updatedAt: r.updated_at };
+}
+
+function orderDto(o, items) {
   return {
     id: o.id,
     ownerId: o.owner_id,
     restaurantId: o.restaurant_id,
     title: o.title,
-    items: JSON.parse(o.items),
-    customizations: o.customizations,
+    items,
     notes: o.notes,
     isDefault: o.is_default === 1,
     createdAt: o.created_at,
@@ -51,9 +64,45 @@ async function readBody(req) {
   }
 }
 
-function requireText(value, field) {
+function requireText(value, field, max) {
   if (typeof value !== 'string' || !value.trim()) throw new HttpError(400, `${field} is required`);
-  return value.trim();
+  const text = value.trim();
+  if (max && text.length > max) throw new HttpError(400, `${field} must be at most ${max} characters`);
+  return text;
+}
+
+function optionalText(value, field, max) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new HttpError(400, `${field} must be text`);
+  const text = value.trim();
+  if (text.length > max) throw new HttpError(400, `${field} must be at most ${max} characters`);
+  return text || null;
+}
+
+// Validates and normalizes an order's items. An order needs at least one item;
+// quantity defaults to 1 and must be a whole number of at least 1.
+function parseItems(items) {
+  if (!Array.isArray(items) || items.length === 0) throw new HttpError(400, 'An order needs at least one item');
+  return items.map((item, i) => {
+    if (!item || typeof item !== 'object') throw new HttpError(400, `items[${i}] is invalid`);
+    const name = requireText(item.name, `items[${i}].name`, LIMITS.itemName);
+    const quantity = item.quantity === undefined || item.quantity === null ? 1 : item.quantity;
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw new HttpError(400, `items[${i}].quantity must be a whole number of at least 1`);
+    }
+    const custom = item.customizations ?? [];
+    if (!Array.isArray(custom)) throw new HttpError(400, `items[${i}].customizations must be a list`);
+    const customizations = custom.map((c, j) => {
+      const field = `items[${i}].customizations[${j}]`;
+      if (!c || !CUSTOMIZATION_KINDS.includes(c.kind)) {
+        throw new HttpError(400, `${field}.kind must be one of ${CUSTOMIZATION_KINDS.join(', ')}`);
+      }
+      const result = { kind: c.kind, ingredient: requireText(c.ingredient, `${field}.ingredient`, LIMITS.ingredient) };
+      if (c.kind === 'substitute') result.insteadOf = requireText(c.insteadOf, `${field}.insteadOf`, LIMITS.ingredient);
+      return result;
+    });
+    return { name, quantity, customizations };
+  });
 }
 
 export function createApp(db) {
@@ -70,9 +119,17 @@ export function createApp(db) {
     );
   }
 
-  function ownRestaurant(userId, id) {
-    const r = one('select * from restaurants where id = ? and owner_id = ?', id, userId);
+  // Users can see their own restaurants and administrator-owned ones (null owner).
+  function visibleRestaurant(userId, id) {
+    const r = one('select * from restaurants where id = ? and (owner_id = ? or owner_id is null)', id, userId);
     if (!r) throw new HttpError(404, 'Restaurant not found');
+    return r;
+  }
+
+  // Only user-created restaurants can be renamed or removed by their owner.
+  function ownRestaurant(userId, id) {
+    const r = visibleRestaurant(userId, id);
+    if (r.owner_id === null) throw new HttpError(403, 'Administrator-owned restaurants cannot be changed');
     return r;
   }
 
@@ -80,6 +137,57 @@ export function createApp(db) {
     const o = one('select * from orders where id = ? and owner_id = ?', id, userId);
     if (!o) throw new HttpError(404, 'Order not found');
     return o;
+  }
+
+  function loadItems(orderIds) {
+    const byOrder = new Map(orderIds.map((id) => [id, []]));
+    if (orderIds.length === 0) return byOrder;
+    const marks = orderIds.map(() => '?').join(',');
+    const items = all(`select * from order_items where order_id in (${marks}) order by position`, ...orderIds);
+    const byItem = new Map();
+    for (const it of items) {
+      const dto = { name: it.name, quantity: it.quantity, customizations: [] };
+      byItem.set(it.id, dto);
+      byOrder.get(it.order_id).push(dto);
+    }
+    if (items.length > 0) {
+      const itemMarks = items.map(() => '?').join(',');
+      const customs = all(
+        `select * from order_item_customizations where item_id in (${itemMarks}) order by position`,
+        ...items.map((it) => it.id),
+      );
+      for (const c of customs) {
+        byItem.get(c.item_id).customizations.push(
+          c.kind === 'substitute'
+            ? { kind: c.kind, ingredient: c.ingredient, insteadOf: c.instead_of }
+            : { kind: c.kind, ingredient: c.ingredient },
+        );
+      }
+    }
+    return byOrder;
+  }
+
+  function ordersDto(rows) {
+    const items = loadItems(rows.map((o) => o.id));
+    return rows.map((o) => orderDto(o, items.get(o.id)));
+  }
+
+  const orderById = (id) => ordersDto([one('select * from orders where id = ?', id)])[0];
+
+  function writeItems(orderId, items) {
+    run('delete from order_items where order_id = ?', orderId);
+    items.forEach((item, i) => {
+      const itemId = randomUUID();
+      run('insert into order_items (id, order_id, position, name, quantity) values (?, ?, ?, ?, ?)',
+        itemId, orderId, i, item.name, item.quantity);
+      item.customizations.forEach((c, j) => {
+        run(
+          `insert into order_item_customizations (id, item_id, position, kind, ingredient, instead_of)
+           values (?, ?, ?, ?, ?, ?)`,
+          randomUUID(), itemId, j, c.kind, c.ingredient, c.insteadOf ?? null,
+        );
+      });
+    });
   }
 
   function issueSession(user) {
@@ -100,23 +208,26 @@ export function createApp(db) {
     }
   }
 
-  // A restaurant's first order becomes its default.
+  // A restaurant's first order becomes its default. Any owner id sent by the client is ignored.
   function insertOrder(userId, restaurantId, body, transactional = true) {
     const id = randomUUID();
+    const items = parseItems(body.items);
+    const title = optionalText(body.title, 'title', LIMITS.title) ?? '';
+    const notes = optionalText(body.notes, 'notes', LIMITS.notes);
     const write = () => {
-      const hasOrders = !!one('select 1 from orders where restaurant_id = ?', restaurantId);
+      const hasOrders = !!one('select 1 from orders where restaurant_id = ? and owner_id = ?', restaurantId, userId);
       const isDefault = body.isDefault === true || !hasOrders;
-      if (isDefault) run('update orders set is_default = 0 where restaurant_id = ?', restaurantId);
+      if (isDefault) run('update orders set is_default = 0 where restaurant_id = ? and owner_id = ?', restaurantId, userId);
       run(
-        `insert into orders (id, owner_id, restaurant_id, title, items, customizations, notes, is_default)
-         values (?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, userId, restaurantId, body.title ?? '', JSON.stringify(Array.isArray(body.items) ? body.items : []),
-        body.customizations ?? null, body.notes ?? null, isDefault ? 1 : 0,
+        `insert into orders (id, owner_id, restaurant_id, title, notes, is_default)
+         values (?, ?, ?, ?, ?, ?)`,
+        id, userId, restaurantId, title, notes, isDefault ? 1 : 0,
       );
+      writeItems(id, items);
     };
     if (transactional) withTransaction(write);
     else write();
-    return { ...orderDto(one('select * from orders where id = ?', id)), restaurantId };
+    return orderById(id);
   }
 
   // [method, pattern, handler, requiresAuth]
@@ -162,31 +273,74 @@ export function createApp(db) {
     }],
 
     // Restaurants -------------------------------------------------------------
+    // The list holds the user's own restaurants plus administrator-owned ones where they saved an order.
+    // For administrator-owned restaurants, "updated" reflects only this user's orders.
     ['GET', '/api/restaurants', ({ user }) => {
       const rows = all(
-        `select r.id, r.name, r.updated_at,
-                (select count(*) from orders o where o.restaurant_id = r.id and o.owner_id = r.owner_id) as order_count,
-                (select o.items from orders o where o.restaurant_id = r.id and o.is_default = 1) as default_items
-           from restaurants r where r.owner_id = ? order by r.updated_at desc`,
-        user.id,
+        `select * from (
+           select r.id, r.name, r.owner_id,
+                  case when r.owner_id is null
+                       then (select max(o.updated_at) from orders o where o.restaurant_id = r.id and o.owner_id = ?)
+                       else r.updated_at end as updated_at,
+                  (select count(*) from orders o where o.restaurant_id = r.id and o.owner_id = ?) as order_count,
+                  (select o.id from orders o where o.restaurant_id = r.id and o.owner_id = ? and o.is_default = 1) as default_order_id
+             from restaurants r
+            where r.owner_id = ?
+               or (r.owner_id is null and exists (select 1 from orders o where o.restaurant_id = r.id and o.owner_id = ?))
+         ) order by updated_at desc`,
+        user.id, user.id, user.id, user.id, user.id,
       );
+      const defaults = loadItems(rows.map((r) => r.default_order_id).filter(Boolean));
       return [200, rows.map((r) => ({
         id: r.id,
         name: r.name,
         orderCount: r.order_count,
-        defaultItems: r.default_items ? JSON.parse(r.default_items) : [],
+        defaultItems: r.default_order_id ? defaults.get(r.default_order_id).map((i) => i.name) : [],
+        adminOwned: r.owner_id === null,
         updatedAt: r.updated_at,
       }))];
     }],
 
-    ['GET', '/api/restaurants/:id', ({ user, params }) => {
-      const r = ownRestaurant(user.id, params.id);
-      return [200, { id: r.id, name: r.name, updatedAt: r.updated_at }];
+    // Auto-fill for the add-order flow: administrator-owned and the user's own restaurants.
+    ['GET', '/api/restaurant-suggestions', ({ user, query }) => {
+      const q = `%${(query.get('q') ?? '').trim()}%`;
+      const rows = all(
+        `select * from restaurants where (owner_id = ? or owner_id is null) and name like ?
+          order by lower(name), owner_id is null limit 10`,
+        user.id, q,
+      );
+      return [200, rows.map(restaurantDto)];
     }],
+
+    // Auto-fill for customizations: common toppings plus ingredients the user used before.
+    ['GET', '/api/toppings', ({ user, query }) => {
+      const q = (query.get('q') ?? '').trim().toLowerCase();
+      const used = all(
+        `select distinct c.ingredient as name from order_item_customizations c
+           join order_items i on i.id = c.item_id join orders o on o.id = i.order_id
+          where o.owner_id = ?
+         union
+         select distinct c.instead_of from order_item_customizations c
+           join order_items i on i.id = c.item_id join orders o on o.id = i.order_id
+          where o.owner_id = ? and c.instead_of is not null`,
+        user.id, user.id,
+      ).map((r) => r.name);
+      const seen = new Set();
+      const result = [];
+      for (const name of [...used, ...COMMON_TOPPINGS]) {
+        const key = name.toLowerCase();
+        if (seen.has(key) || !key.includes(q)) continue;
+        seen.add(key);
+        result.push(name);
+      }
+      return [200, result.sort((a, b) => a.localeCompare(b)).slice(0, 10)];
+    }],
+
+    ['GET', '/api/restaurants/:id', ({ user, params }) => [200, restaurantDto(visibleRestaurant(user.id, params.id))]],
 
     ['PATCH', '/api/restaurants/:id', ({ user, params, body }) => {
       ownRestaurant(user.id, params.id);
-      run('update restaurants set name = ?, updated_at = ? where id = ?', requireText(body.name, 'name'), now(), params.id);
+      run('update restaurants set name = ?, updated_at = ? where id = ?', requireText(body.name, 'name', LIMITS.restaurantName), now(), params.id);
       return [200, { id: params.id, name: body.name.trim() }];
     }],
 
@@ -203,20 +357,26 @@ export function createApp(db) {
 
     // Orders ------------------------------------------------------------------
     ['GET', '/api/restaurants/:id/orders', ({ user, params }) => {
-      ownRestaurant(user.id, params.id);
-      const rows = all('select * from orders where restaurant_id = ? order by updated_at desc', params.id);
-      return [200, rows.map(orderDto)];
+      visibleRestaurant(user.id, params.id);
+      const rows = all('select * from orders where restaurant_id = ? and owner_id = ? order by updated_at desc', params.id, user.id);
+      return [200, ordersDto(rows)];
     }],
 
     ['POST', '/api/restaurants/:id/orders', ({ user, params, body }) => {
-      ownRestaurant(user.id, params.id);
+      visibleRestaurant(user.id, params.id);
       return [201, insertOrder(user.id, params.id, body)];
     }],
 
-    // Restaurants are created only by saving an order. The name is matched exactly;
-    // different spellings stay separate restaurants.
+    // Restaurants are created only by saving an order. Picking a suggestion sends restaurantId
+    // (administrator-owned or the user's own). A typed name is matched exactly against the user's own
+    // restaurants; otherwise a new user-created restaurant is made. Different spellings stay separate.
     ['POST', '/api/orders', ({ user, body }) => {
-      const name = requireText(body.restaurantName, 'restaurantName');
+      if (body.restaurantId !== undefined && body.restaurantId !== null) {
+        const r = visibleRestaurant(user.id, String(body.restaurantId));
+        return [201, insertOrder(user.id, r.id, body)];
+      }
+      const name = requireText(body.restaurantName, 'restaurantName', LIMITS.restaurantName);
+      parseItems(body.items);
       const order = withTransaction(() => {
         let r = one('select id from restaurants where owner_id = ? and name = ?', user.id, name);
         if (!r) {
@@ -235,25 +395,34 @@ export function createApp(db) {
         params.id, user.id, user.id,
       );
       if (!o) throw new HttpError(404, 'Order not found');
-      return [200, orderDto(o)];
+      return [200, ordersDto([o])[0]];
     }],
 
+    // Orders cannot be moved to another restaurant (v1); the owner id cannot be changed either.
     ['PATCH', '/api/orders/:id', ({ user, params, body }) => {
       const o = ownOrder(user.id, params.id);
+      if (body.restaurantId !== undefined && body.restaurantId !== o.restaurant_id) {
+        throw new HttpError(400, 'An order cannot be moved to a different restaurant');
+      }
+      if (body.restaurantName !== undefined) {
+        throw new HttpError(400, 'An order cannot be moved to a different restaurant');
+      }
+      const items = body.items !== undefined ? parseItems(body.items) : null;
+      const title = body.title !== undefined ? optionalText(body.title, 'title', LIMITS.title) ?? '' : o.title;
+      const notes = body.notes !== undefined ? optionalText(body.notes, 'notes', LIMITS.notes) : o.notes;
       withTransaction(() => {
-        if (body.isDefault === true) run('update orders set is_default = 0 where restaurant_id = ?', o.restaurant_id);
+        if (body.isDefault === true) {
+          run('update orders set is_default = 0 where restaurant_id = ? and owner_id = ?', o.restaurant_id, user.id);
+        }
         run(
-          `update orders set title = ?, items = ?, customizations = ?, notes = ?, is_default = ?, updated_at = ?
-           where id = ?`,
-          body.title ?? o.title,
-          Array.isArray(body.items) ? JSON.stringify(body.items) : o.items,
-          body.customizations !== undefined ? body.customizations : o.customizations,
-          body.notes !== undefined ? body.notes : o.notes,
+          'update orders set title = ?, notes = ?, is_default = ?, updated_at = ? where id = ?',
+          title, notes,
           body.isDefault !== undefined ? (body.isDefault ? 1 : 0) : o.is_default,
           now(), o.id,
         );
+        if (items) writeItems(o.id, items);
       });
-      return [200, orderDto(one('select * from orders where id = ?', o.id))];
+      return [200, orderById(o.id)];
     }],
 
     // Deleting the default order promotes the most recently updated remaining order.
@@ -264,8 +433,9 @@ export function createApp(db) {
         if (o.is_default === 1) {
           run(
             `update orders set is_default = 1 where id =
-               (select id from orders where restaurant_id = ? order by updated_at desc, created_at desc limit 1)`,
-            o.restaurant_id,
+               (select id from orders where restaurant_id = ? and owner_id = ?
+                 order by updated_at desc, created_at desc limit 1)`,
+            o.restaurant_id, user.id,
           );
         }
       });
@@ -340,12 +510,13 @@ export function createApp(db) {
           where s.shared_with = ? order by s.created_at desc`,
         user.id,
       );
+      const items = loadItems(rows.map((r) => r.id));
       return [200, rows.map((r) => ({
         shareId: r.share_id,
         sharedAt: r.shared_at,
         restaurantName: r.restaurant_name,
         sharedBy: publicUser({ id: r.uid, email: r.email, phone: r.phone, display_name: r.display_name }),
-        order: orderDto(r),
+        order: orderDto(r, items.get(r.id)),
       }))];
     }],
 

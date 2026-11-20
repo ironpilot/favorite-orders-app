@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   calls: [] as [string, string][],
   bodies: [] as unknown[],
   orders: [] as unknown[],
+  suggestions: [] as unknown[],
+  toppings: [] as string[],
   signUp: vi.fn(),
   signIn: vi.fn(),
 }));
@@ -42,6 +44,8 @@ vi.mock('@/lib/api', () => {
         return { token: 't', user: { id: state.userId } };
       }
       if (path === '/api/restaurants') return state.rows;
+      if (path.startsWith('/api/restaurant-suggestions')) return state.suggestions;
+      if (path.startsWith('/api/toppings')) return state.toppings;
       if (method === 'POST' && path === '/api/orders') {
         state.bodies.push(body);
         return { id: 'o-new', restaurantId: 'r-new', items: [], isDefault: true };
@@ -66,6 +70,8 @@ beforeEach(() => {
   state.calls = [];
   state.bodies = [];
   state.orders = [];
+  state.suggestions = [];
+  state.toppings = [];
   state.signIn.mockClear();
   state.signUp.mockClear();
 });
@@ -183,17 +189,64 @@ describe('RestaurantListPage', () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true);
   });
+
+  it('leads from the first-order prompt into the add-order flow', async () => {
+    state.userId = 'user-1';
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants');
+    const wrapper = mount(RestaurantListPage, { global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.find('[data-testid="empty-add-order"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants/new-order');
+  });
+
+  it('shows the name and an add-order prompt for a restaurant with no orders', async () => {
+    state.userId = 'user-1';
+    state.rows = [{ id: 'r9', name: 'Empty Diner', updatedAt: '', orderCount: 0, defaultItems: [] }];
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants');
+    const wrapper = mount(RestaurantListPage, { global: { plugins: [router] } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="restaurant-name"]').text()).toBe('Empty Diner');
+    await wrapper.find('[data-testid="empty-entry-add-order"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants/new-order');
+    expect(router.currentRoute.value.query.restaurantId).toBe('r9');
+  });
+
+  it('wraps and clamps a very long restaurant name without losing it', async () => {
+    state.userId = 'user-1';
+    const long = 'Very Long Restaurant Name '.repeat(8).trim();
+    state.rows = [{ id: 'r1', name: long, updatedAt: '', orderCount: 1, defaultItems: ['Taco'] }];
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    const name = wrapper.find('[data-testid="restaurant-name"]');
+    expect(name.text()).toBe(long);
+    expect(name.attributes('title')).toBe(long);
+    expect(name.classes()).toContain('restaurant-name');
+    expect(wrapper.find('ion-label').classes()).toContain('ion-text-wrap');
+  });
 });
 
 describe('RestaurantOrdersPage', () => {
   it('lists the orders saved at the restaurant', async () => {
     state.userId = 'user-1';
-    state.orders = [{ id: 'o1', title: 'Usual', items: ['Taco', 'Soda'], notes: null, isDefault: true }];
+    state.orders = [{
+      id: 'o1',
+      title: 'Usual',
+      items: [
+        { name: 'Taco', quantity: 2, customizations: [{ kind: 'remove', ingredient: 'Onions' }] },
+        { name: 'Soda', quantity: 1, customizations: [] },
+      ],
+      notes: null,
+      isDefault: true,
+    }];
     const wrapper = mount(RestaurantOrdersPage, { props: { id: 'r1' } });
     await flushPromises();
     expect(state.calls).toContainEqual(['GET', '/api/restaurants/r1/orders']);
     expect(wrapper.find('[data-testid="restaurant-title"]').text()).toBe('Taco Spot');
-    expect(wrapper.find('[data-testid="order-items"]').text()).toBe('Taco, Soda');
+    expect(wrapper.find('[data-testid="order-items"]').text()).toBe('2× Taco (No Onions), Soda');
     expect(wrapper.find('[data-testid="default-badge"]').exists()).toBe(true);
   });
 });
@@ -205,26 +258,165 @@ describe('AddOrderPage', () => {
     await router.push('/tabs/restaurants/new-order');
     const wrapper = mount(AddOrderPage, { global: { plugins: [router] } });
     return { router, vm: wrapper.vm as unknown as {
-      restaurantName: string; itemsText: string; submit: () => Promise<void>;
+      restaurantName: string;
+      title: string;
+      notes: string;
+      items: { name: string; quantity: number; customizations: { kind: string; ingredient: string; insteadOf: string }[] }[];
+      submit: () => Promise<void>;
     }, wrapper };
   }
 
-  it('saves the order by restaurant name and opens that restaurant', async () => {
-    const { router, vm } = await mountForm();
+  it('opens the form from the add-order action', async () => {
+    const { wrapper } = await mountForm();
+    expect(wrapper.find('[data-testid="add-order-form"]').exists()).toBe(true);
+    expect(wrapper.findAll('[data-testid="order-item-row"]')).toHaveLength(1);
+  });
+
+  it('adds, edits and removes items, with quantity starting at 1', async () => {
+    const { vm, wrapper } = await mountForm();
+    await wrapper.find('[data-testid="add-item"]').trigger('click');
+    expect(wrapper.findAll('[data-testid="item-quantity"]').map((q) => q.text())).toEqual(['1', '1']);
+    await wrapper.findAll('[data-testid="quantity-increase"]')[1].trigger('click');
+    await wrapper.findAll('[data-testid="quantity-increase"]')[1].trigger('click');
+    expect(vm.items[1].quantity).toBe(3);
+    await wrapper.findAll('[data-testid="quantity-decrease"]')[0].trigger('click');
+    expect(vm.items[0].quantity).toBe(1);
+    vm.items[0].name = 'Burger';
+    vm.items[1].name = 'Fries';
+    vm.items[0].name = 'Cheeseburger';
+    await wrapper.findAll('[data-testid="remove-item"]')[0].trigger('click');
+    expect(vm.items.map((i) => i.name)).toEqual(['Fries']);
+  });
+
+  it('saves items with mixed customizations, name and notes, then opens the restaurant', async () => {
+    const { router, vm, wrapper } = await mountForm();
     vm.restaurantName = '  New Place ';
-    vm.itemsText = 'Burger\n\nFries';
+    vm.title = ' Game night ';
+    vm.notes = ' Extra napkins ';
+    vm.items[0].name = ' Hamburger ';
+    for (const kind of ['remove', 'add', 'substitute']) {
+      await wrapper.find(`[data-testid="add-${kind}"]`).trigger('click');
+    }
+    const [r, a, s] = vm.items[0].customizations;
+    r.ingredient = 'Lettuce';
+    a.ingredient = 'Onions';
+    s.ingredient = 'Mayonnaise';
+    s.insteadOf = 'Ketchup';
+    await wrapper.find('[data-testid="add-item"]').trigger('click');
+    vm.items[1].name = 'Fries';
+    await wrapper.find('[data-testid="add-item"]').trigger('click');
     await vm.submit();
     await flushPromises();
-    expect(state.bodies).toEqual([{ restaurantName: 'New Place', items: ['Burger', 'Fries'] }]);
+    expect(state.bodies).toEqual([{
+      restaurantName: 'New Place',
+      title: 'Game night',
+      notes: 'Extra napkins',
+      items: [
+        {
+          name: 'Hamburger',
+          quantity: 1,
+          customizations: [
+            { kind: 'remove', ingredient: 'Lettuce' },
+            { kind: 'add', ingredient: 'Onions' },
+            { kind: 'substitute', ingredient: 'Mayonnaise', insteadOf: 'Ketchup' },
+          ],
+        },
+        { name: 'Fries', quantity: 1, customizations: [] },
+      ],
+    }]);
     expect(router.currentRoute.value.path).toBe('/tabs/restaurants/r-new');
   });
 
-  it('requires a restaurant name and at least one item', async () => {
+  it('blocks saving without items with a clear message', async () => {
     const { vm, wrapper } = await mountForm();
-    vm.itemsText = 'Burger';
+    vm.restaurantName = 'Place';
     await vm.submit();
     await flushPromises();
-    expect(wrapper.find('[data-testid="save-error"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="save-error"]').text()).toBe('Add at least one item.');
+    await wrapper.find('[data-testid="remove-item"]').trigger('click');
+    await vm.submit();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="save-error"]').text()).toBe('Add at least one item.');
     expect(state.bodies).toEqual([]);
+  });
+
+  it('requires a restaurant name and a complete substitution', async () => {
+    const { vm, wrapper } = await mountForm();
+    vm.items[0].name = 'Burger';
+    await vm.submit();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="save-error"]').text()).toBe('Enter a restaurant name.');
+    vm.restaurantName = 'Place';
+    await wrapper.find('[data-testid="add-substitute"]').trigger('click');
+    vm.items[0].customizations[0].ingredient = 'Mayo';
+    await vm.submit();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="save-error"]').text()).toBe('Complete both parts of each substitution.');
+    expect(state.bodies).toEqual([]);
+  });
+
+  it('suggests restaurants as the user types and saves at a picked one', async () => {
+    const { vm, wrapper } = await mountForm();
+    state.suggestions = [
+      { id: 'admin-1', name: 'Burger Co', adminOwned: true, updatedAt: '' },
+      { id: 'mine-1', name: 'Burger Shack', adminOwned: false, updatedAt: '' },
+    ];
+    vm.restaurantName = 'Burg';
+    await flushPromises();
+    const options = wrapper.findAll('[data-testid="restaurant-suggestion"]');
+    expect(options.map((o) => o.text())).toEqual(['Burger Co Listed', 'Burger Shack']);
+    await options[0].trigger('click');
+    await flushPromises();
+    expect(vm.restaurantName).toBe('Burger Co');
+    expect(wrapper.find('[data-testid="restaurant-picked"]').exists()).toBe(true);
+    vm.items[0].name = 'Burger';
+    await vm.submit();
+    await flushPromises();
+    expect(state.bodies).toEqual([{ restaurantId: 'admin-1', items: [{ name: 'Burger', quantity: 1, customizations: [] }] }]);
+  });
+
+  it('creates a new restaurant when a name is typed without picking a suggestion', async () => {
+    const { vm, wrapper } = await mountForm();
+    state.suggestions = [{ id: 'admin-1', name: 'Burger Co', adminOwned: true, updatedAt: '' }];
+    vm.restaurantName = 'Burger Corner';
+    await flushPromises();
+    expect(wrapper.find('[data-testid="restaurant-new"]').exists()).toBe(true);
+    vm.items[0].name = 'Burger';
+    await vm.submit();
+    await flushPromises();
+    expect(state.bodies).toEqual([{ restaurantName: 'Burger Corner', items: [{ name: 'Burger', quantity: 1, customizations: [] }] }]);
+  });
+
+  it('preselects the restaurant when opened from it', async () => {
+    state.userId = 'user-1';
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants/new-order?restaurantId=r1');
+    const wrapper = mount(AddOrderPage, { global: { plugins: [router] } });
+    await flushPromises();
+    const vm = wrapper.vm as unknown as { restaurantName: string; selectedRestaurant: { id: string } | null };
+    expect(vm.restaurantName).toBe('Taco Spot');
+    expect(vm.selectedRestaurant?.id).toBe('r1');
+  });
+
+  it('auto-fills customizations from common toppings', async () => {
+    const { vm, wrapper } = await mountForm();
+    state.toppings = ['Onions', 'Onion Rings'];
+    await wrapper.find('[data-testid="add-add"]').trigger('click');
+    const ext = wrapper.vm as unknown as { loadToppings: (c: unknown, f: string) => Promise<void> };
+    await ext.loadToppings(vm.items[0].customizations[0], 'ingredient');
+    await flushPromises();
+    const chips = wrapper.findAll('[data-testid="topping-suggestion"]');
+    expect(chips.map((c) => c.text())).toEqual(['Onions', 'Onion Rings']);
+    await chips[0].trigger('click');
+    expect(vm.items[0].customizations[0].ingredient).toBe('Onions');
+    expect(wrapper.find('[data-testid="topping-suggestions"]').exists()).toBe(false);
+  });
+
+  it('limits the length of long text fields', async () => {
+    const { wrapper } = await mountForm();
+    for (const id of ['restaurant-input', 'title-input', 'item-name-input', 'notes-input']) {
+      const el = wrapper.find(`[data-testid="${id}"]`).element as HTMLElement & { maxlength?: number };
+      expect(Number(el.maxlength ?? el.getAttribute('maxlength'))).toBeGreaterThan(0);
+    }
   });
 });

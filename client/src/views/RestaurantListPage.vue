@@ -21,12 +21,19 @@
           {{ errorMessage }}
         </ion-text>
       </p>
-      <p
+      <div
         v-else-if="restaurants.length === 0"
+        class="ion-text-center"
         data-testid="empty-state"
       >
-        No restaurants yet. Add your first favorite order to get started.
-      </p>
+        <p>No restaurants yet. Add your first favorite order to get started.</p>
+        <ion-button
+          data-testid="empty-add-order"
+          @click="addOrder"
+        >
+          Add your first order
+        </ion-button>
+      </div>
       <ion-list
         v-else
         data-testid="restaurant-list"
@@ -39,8 +46,12 @@
           data-testid="restaurant-item"
           @click="openRestaurant(restaurant.id)"
         >
-          <ion-label class="ion-text-wrap">
-            <h2 data-testid="restaurant-name">
+          <ion-label class="ion-text-wrap restaurant-label">
+            <h2
+              class="restaurant-name"
+              :title="restaurant.name"
+              data-testid="restaurant-name"
+            >
               {{ restaurant.name }}
             </h2>
             <p
@@ -55,12 +66,19 @@
             >
               No default order set
             </p>
-            <p
-              v-else
-              data-testid="preview-fallback"
-            >
-              No orders yet. Tap to add one.
-            </p>
+            <template v-else>
+              <p data-testid="preview-fallback">
+                No orders yet. Tap to add one.
+              </p>
+              <ion-button
+                size="small"
+                fill="outline"
+                data-testid="empty-entry-add-order"
+                @click.stop="addOrderAt(restaurant)"
+              >
+                Add order
+              </ion-button>
+            </template>
           </ion-label>
           <ion-badge
             slot="end"
@@ -105,6 +123,7 @@ import {
   IonFab,
   IonFabButton,
   IonIcon,
+  IonButton,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import { add } from 'ionicons/icons';
@@ -124,6 +143,10 @@ function addOrder() {
   router.push('/tabs/restaurants/new-order');
 }
 
+function addOrderAt(restaurant: RestaurantSummary) {
+  router.push({ path: '/tabs/restaurants/new-order', query: { restaurantId: restaurant.id, restaurant: restaurant.name } });
+}
+
 async function load() {
   errorMessage.value = '';
   try {
@@ -140,3 +163,18 @@ load();
 
 defineExpose({ load });
 </script>
+
+<style scoped>
+.restaurant-label {
+  min-width: 0;
+}
+
+/* Long names wrap at any character and are clamped to two lines so the entry keeps its layout. */
+.restaurant-name {
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>

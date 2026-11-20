@@ -77,8 +77,8 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 |------|--------|
 | 1. Restaurant data and list screen skeleton | Complete |
 | 2. Default order and key-items preview | Complete |
-| 3. Select restaurant and add-order entry point | Partial |
-| 4. Empty states | Partial |
+| 3. Select restaurant and add-order entry point | Complete |
+| 4. Empty states | Complete |
 | 5. Search and sort | Not started |
 | 6. Remove a restaurant | Partial |
 | 7. Offline support | Not started |
@@ -134,7 +134,7 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 - Order items default to quantity 1, and each item can have remove, add, and substitute customizations (e.g. Hamburger: No Lettuce, add Onions, Mayonnaise instead of Ketchup).
 
 ### Step 4: Empty states
-- **Status:** Partial. Done: the empty state for a user with no restaurants. Remaining: confirm the add-order prompt for restaurants with no orders and the long-name layout, and add tests for both.
+- **Status:** Complete. The empty state has a button into the add-order flow. A restaurant with no orders shows its name and an add-order prompt that opens the flow with that restaurant preselected. Long names wrap and are clamped to two lines. All four have unit tests.
 - **Outcome:** New users and empty restaurant entries get clear prompts to add an order.
 - **Covers:** FR11, FR15
 - **Acceptance check:** A user with no restaurants sees the first-order prompt. A restaurant with no orders shows its name and an add-order prompt. Very long names are handled without breaking the layout.

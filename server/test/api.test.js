@@ -1,13 +1,15 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDatabase } from '../src/db.js';
+import { addAdminRestaurant, openDatabase } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
 let server;
 let base;
+let db;
 
 before(async () => {
-  server = createApp(openDatabase(':memory:'));
+  db = openDatabase(':memory:');
+  server = createApp(db);
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://localhost:${server.address().port}`;
 });
@@ -32,8 +34,13 @@ async function signUp(email) {
   return data;
 }
 
+const items = (...names) => names.map((name) => ({ name }));
+
+// String items are shorthand for { name } items.
 async function saveOrder(token, restaurantName, body = {}) {
-  const res = await call('POST', '/api/orders', { token, body: { restaurantName, items: ['Item'], ...body } });
+  const payload = { restaurantName, items: items('Item'), ...body };
+  payload.items = payload.items.map((i) => (typeof i === 'string' ? { name: i } : i));
+  const res = await call('POST', '/api/orders', { token, body: payload });
   assert.equal(res.status, 201);
   return res.data;
 }
@@ -67,7 +74,7 @@ describe('restaurants and orders', () => {
     await saveOrder(token, 'Pho House');
     const first = await saveOrder(token, 'Taco Spot', { items: ['Al pastor'] });
     const taco = { id: first.restaurantId };
-    const second = await call('POST', `/api/restaurants/${taco.id}/orders`, { token, body: { items: ['Carnitas'], isDefault: true } });
+    const second = await call('POST', `/api/restaurants/${taco.id}/orders`, { token, body: { items: items('Carnitas'), isDefault: true } });
     assert.equal(second.data.isDefault, true);
 
     const list = (await call('GET', '/api/restaurants', { token })).data;
@@ -133,6 +140,177 @@ describe('saving orders by restaurant name', () => {
     assert.equal((await call('POST', '/api/restaurants', { token, body: { name: 'X' } })).status, 404);
     assert.equal((await call('POST', '/api/orders', { token, body: { items: [] } })).status, 400);
     assert.deepEqual((await call('GET', '/api/restaurants', { token })).data, []);
+  });
+});
+
+describe('administrator-owned restaurants and auto-fill', () => {
+  it('suggests administrator-owned and own restaurants, never other users\' ones', async () => {
+    const adminId = addAdminRestaurant(db, 'Suggest Burger Co');
+    const { token } = await signUp('suggest@example.com');
+    const { token: other } = await signUp('suggest2@example.com');
+    await saveOrder(token, 'Suggest Burger Shack');
+    await saveOrder(other, 'Suggest Burger Secret');
+    const res = await call('GET', '/api/restaurant-suggestions?q=suggest%20burger', { token });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.data.map((r) => [r.name, r.adminOwned]), [['Suggest Burger Co', true], ['Suggest Burger Shack', false]]);
+    assert.equal(res.data[0].id, adminId);
+  });
+
+  it('saves at a picked administrator-owned restaurant and lists it only for users with orders', async () => {
+    const adminId = addAdminRestaurant(db, 'Admin Pizza');
+    const a = await signUp('adminpick@example.com');
+    const b = await signUp('adminpick2@example.com');
+    assert.deepEqual((await call('GET', '/api/restaurants', { token: a.token })).data, []);
+
+    const oa = await saveOrder(a.token, undefined, { restaurantId: adminId, items: ['Margherita'] });
+    const ob = await saveOrder(b.token, undefined, { restaurantId: adminId, items: ['Pepperoni'] });
+    assert.equal(oa.restaurantId, adminId);
+    assert.equal(oa.isDefault, true);
+    assert.equal(ob.isDefault, true);
+
+    const [ra] = (await call('GET', '/api/restaurants', { token: a.token })).data;
+    assert.deepEqual([ra.name, ra.orderCount, ra.defaultItems, ra.adminOwned], ['Admin Pizza', 1, ['Margherita'], true]);
+    const orders = (await call('GET', `/api/restaurants/${adminId}/orders`, { token: a.token })).data;
+    assert.deepEqual(orders.map((o) => o.id), [oa.id]);
+  });
+
+  it('creates a separate user-created restaurant when a name is typed instead of picked', async () => {
+    addAdminRestaurant(db, 'Typed Tacos');
+    const { token } = await signUp('typed@example.com');
+    const o = await saveOrder(token, 'Typed Tacos');
+    const [r] = (await call('GET', '/api/restaurants', { token })).data;
+    assert.equal(r.id, o.restaurantId);
+    assert.equal(r.adminOwned, false);
+  });
+
+  it('does not let users rename or remove administrator-owned restaurants', async () => {
+    const adminId = addAdminRestaurant(db, 'Locked Diner');
+    const { token } = await signUp('locked@example.com');
+    await saveOrder(token, undefined, { restaurantId: adminId });
+    assert.equal((await call('PATCH', `/api/restaurants/${adminId}`, { token, body: { name: 'Mine' } })).status, 403);
+    assert.equal((await call('DELETE', `/api/restaurants/${adminId}?confirm=true`, { token })).status, 403);
+    assert.equal((await call('GET', `/api/restaurants/${adminId}`, { token })).data.name, 'Locked Diner');
+  });
+
+  it('rejects picking another user\'s restaurant', async () => {
+    const a = await signUp('pickother@example.com');
+    const b = await signUp('pickother2@example.com');
+    const o = await saveOrder(a.token, 'Hidden');
+    const res = await call('POST', '/api/orders', { token: b.token, body: { restaurantId: o.restaurantId, items: items('X') } });
+    assert.equal(res.status, 404);
+  });
+
+  it('suggests common toppings and the user\'s own past ingredients', async () => {
+    const { token } = await signUp('toppings@example.com');
+    await saveOrder(token, 'T', { items: [{ name: 'Bowl', customizations: [{ kind: 'add', ingredient: 'Onion Rings' }] }] });
+    const res = await call('GET', '/api/toppings?q=onion', { token });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.data, ['Onion Rings', 'Onions']);
+    assert.ok((await call('GET', '/api/toppings', { token })).data.length > 0);
+  });
+});
+
+describe('structured orders', () => {
+  const burger = {
+    name: 'Hamburger',
+    quantity: 2,
+    customizations: [
+      { kind: 'remove', ingredient: 'Lettuce' },
+      { kind: 'add', ingredient: 'Onions' },
+      { kind: 'substitute', ingredient: 'Mayonnaise', insteadOf: 'Ketchup' },
+    ],
+  };
+  const fries = { name: 'Fries', quantity: 1, customizations: [] };
+
+  it('round-trips several items with mixed customizations unchanged', async () => {
+    const { token } = await signUp('struct@example.com');
+    const o = await saveOrder(token, 'Burger Barn', { title: 'Game night', notes: 'Extra napkins', items: [burger, fries] });
+    assert.deepEqual(o.items, [burger, fries]);
+    const read = (await call('GET', `/api/orders/${o.id}`, { token })).data;
+    assert.deepEqual(read.items, [burger, fries]);
+    assert.equal(read.title, 'Game night');
+    assert.equal(read.notes, 'Extra napkins');
+    const listed = (await call('GET', `/api/restaurants/${o.restaurantId}/orders`, { token })).data;
+    assert.deepEqual(listed[0].items, [burger, fries]);
+    assert.deepEqual((await call('GET', '/api/restaurants', { token })).data[0].defaultItems, ['Hamburger', 'Fries']);
+  });
+
+  it('rejects an order with no items, on create and update', async () => {
+    const { token } = await signUp('noitems@example.com');
+    assert.equal((await call('POST', '/api/orders', { token, body: { restaurantName: 'X', items: [] } })).status, 400);
+    assert.equal((await call('POST', '/api/orders', { token, body: { restaurantName: 'X' } })).status, 400);
+    assert.deepEqual((await call('GET', '/api/restaurants', { token })).data, []);
+    const o = await saveOrder(token, 'Y');
+    assert.equal((await call('PATCH', `/api/orders/${o.id}`, { token, body: { items: [] } })).status, 400);
+  });
+
+  it('defaults quantity to 1, rejects below 1, and accepts large quantities', async () => {
+    const { token } = await signUp('qty@example.com');
+    const o = await saveOrder(token, 'Qty', { items: [{ name: 'Taco' }] });
+    assert.equal(o.items[0].quantity, 1);
+    for (const quantity of [0, -1, 1.5, '2']) {
+      const res = await call('POST', '/api/orders', { token, body: { restaurantName: 'Qty', items: [{ name: 'Taco', quantity }] } });
+      assert.equal(res.status, 400, `quantity ${quantity}`);
+    }
+    const big = await saveOrder(token, 'Qty', { items: [{ name: 'Taco', quantity: 500 }] });
+    assert.equal(big.items[0].quantity, 500);
+  });
+
+  it('rejects invalid customizations', async () => {
+    const { token } = await signUp('custom@example.com');
+    const bad = [
+      { kind: 'swap', ingredient: 'X' },
+      { kind: 'remove', ingredient: ' ' },
+      { kind: 'substitute', ingredient: 'Mayo' },
+    ];
+    for (const c of bad) {
+      const res = await call('POST', '/api/orders', { token, body: { restaurantName: 'C', items: [{ name: 'A', customizations: [c] }] } });
+      assert.equal(res.status, 400);
+    }
+  });
+
+  it('accepts an order without a name', async () => {
+    const { token } = await signUp('noname@example.com');
+    const o = await saveOrder(token, 'Anon');
+    assert.equal(o.title, '');
+  });
+
+  it('rejects over-long text', async () => {
+    const { token } = await signUp('long@example.com');
+    const long = 'x'.repeat(1001);
+    assert.equal((await call('POST', '/api/orders', { token, body: { restaurantName: long, items: items('A') } })).status, 400);
+    assert.equal((await call('POST', '/api/orders', { token, body: { restaurantName: 'L', items: items(long) } })).status, 400);
+    assert.equal((await call('POST', '/api/orders', { token, body: { restaurantName: 'L', items: items('A'), notes: long } })).status, 400);
+  });
+
+  it('updates items and ignores a client-sent owner id', async () => {
+    const a = await signUp('upd@example.com');
+    const b = await signUp('upd2@example.com');
+    const o = await saveOrder(a.token, 'Upd', { ownerId: b.user.id });
+    assert.equal(o.ownerId, a.user.id);
+    const res = await call('PATCH', `/api/orders/${o.id}`, { token: a.token, body: { items: [burger], ownerId: b.user.id } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.data.items, [burger]);
+    assert.equal(res.data.ownerId, a.user.id);
+  });
+
+  it('does not let another user read, update or delete the order', async () => {
+    const a = await signUp('priv@example.com');
+    const b = await signUp('priv2@example.com');
+    const o = await saveOrder(a.token, 'Private', { items: [burger] });
+    assert.equal((await call('GET', `/api/orders/${o.id}`, { token: b.token })).status, 404);
+    assert.equal((await call('PATCH', `/api/orders/${o.id}`, { token: b.token, body: { items: [fries] } })).status, 404);
+    assert.equal((await call('DELETE', `/api/orders/${o.id}`, { token: b.token })).status, 404);
+    assert.deepEqual((await call('GET', `/api/orders/${o.id}`, { token: a.token })).data.items, [burger]);
+  });
+
+  it('cannot move an order to a different restaurant', async () => {
+    const { token } = await signUp('move@example.com');
+    const o = await saveOrder(token, 'First');
+    const other = await saveOrder(token, 'Second');
+    const res = await call('PATCH', `/api/orders/${o.id}`, { token, body: { restaurantId: other.restaurantId } });
+    assert.equal(res.status, 400);
+    assert.equal((await call('GET', `/api/orders/${o.id}`, { token })).data.restaurantId, o.restaurantId);
   });
 });
 
