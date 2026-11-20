@@ -18,7 +18,7 @@ The Restaurant List is the main screen users see after opening the app or signin
 3. **Restaurant entry:** Each restaurant in the list shows its name, its order count, and the items of its default order as the key-items preview.
 4. **Select a restaurant:** The user can select a restaurant to see the orders recorded at it.
 5. **Add order entry point:** The list provides a prominent "add order" action that starts the flow for adding a favorite order.
-6. **Manual restaurants:** A restaurant appears in the list because the user entered it manually when saving an order. There is no external restaurant lookup.
+6. **Manual restaurants:** A restaurant appears in the list because the user entered it manually, by creating it at the time an order is added or by picking it again later. When adding an order, the user can pick an existing restaurant or create a new one. Each restaurant holds multiple orders; each order has its own items (quantity default 1) with per-item customizations (remove, add, substitute), and editing an order does not change the restaurant. There is no external restaurant lookup.
 7. **List stays in sync with orders:** Adding an order at a new restaurant makes that restaurant appear in the list. Removing the last order at a restaurant keeps the restaurant in the list as an empty entry until the user removes it explicitly.
 8. **Privacy:** The list shows only the user's own restaurants and orders. Orders are private to the owner until shared.
 9. **Navigation:** The list is reachable through navigation suited to one-handed phone use, such as bottom tabs or a menu.
@@ -39,7 +39,7 @@ The Restaurant List is the main screen users see after opening the app or signin
 
 ### Dependencies
 - **Account Creation and Sign Up:** users land on this list after signing up.
-- **Manage Favorite Orders:** supplies the orders and restaurants shown here, and the add/update/remove actions. It must also let the user mark one order per restaurant as the default (used for the key-items preview). This default-order concept is new and is not yet in `spec.md`.
+- **Manage Favorite Orders:** supplies the orders and restaurants shown here, and the add/update/remove actions. Orders are sub-items of restaurants, each with order items (quantity default 1) and per-item customizations, and each order is editable individually. It must also let the user mark one order per restaurant as the default (used for the key-items preview). This default-order concept is new and is not yet in `spec.md`.
 
 ### Edge Cases
 - A new user with no orders (empty state).
@@ -92,7 +92,8 @@ Each step is a usable increment that builds on the previous one. Steps that depe
 ### Step 3: Select restaurant and add-order entry point
 - **Outcome:** The user can open a restaurant to see its orders and start adding an order from a prominent action.
 - **Covers:** FR4, FR5, FR6, FR7 (new restaurants appear)
-- **Assumption:** Restaurants are created only by saving an order. There is no add-restaurant-without-order action.
+- **Assumption:** Restaurants are created at the time an order is added: the add-order flow lets the user pick an existing restaurant or create a new one. There is no standalone add-restaurant action.
+- **Orders:** Each order is a sub-item of its restaurant with a list of order items (quantity default 1), each with optional remove/add/substitute customizations.
 - **Acceptance check:** Selecting an entry opens its orders. Saving an order at a new restaurant makes it appear in the list.
 
 #### Tests
@@ -100,7 +101,10 @@ Each step is a usable increment that builds on the previous one. Steps that depe
 - The add-order action is prominent and starts the add-order flow.
 - Saving an order at a new restaurant adds it to the list.
 - Saving an order at an existing restaurant does not create a duplicate entry.
-- There is no way to add a restaurant without an order.
+- The add-order flow lets the user select an existing restaurant or create a new one.
+- There is no standalone way to add a restaurant without an order.
+- A restaurant can hold multiple orders, and editing one order changes neither the restaurant nor other orders.
+- Order items default to quantity 1, and each item can have remove, add, and substitute customizations (e.g. Hamburger: No Lettuce, add Onions, Mayonnaise instead of Ketchup).
 
 ### Step 4: Empty states
 - **Outcome:** New users and empty restaurant entries get clear prompts to add an order.

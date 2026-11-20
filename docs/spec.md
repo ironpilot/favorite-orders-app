@@ -11,6 +11,10 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 ## Requirements
 ### Functional Requirements
 - Create, edit, and delete a favorite restaurant order (restaurant, items, customizations, notes).
+- Orders are sub-items of restaurants: each restaurant can have multiple orders, and each order can be modified individually without changing the restaurant.
+- When adding an order, the user selects an existing restaurant or creates a new restaurant at that time.
+- Each order has a list of order items, each with a quantity (default 1).
+- Each order item can be customized with removals, additions, and substitutions (for example, a Hamburger with No Lettuce, add Onions, Mayonnaise instead of Ketchup).
 - Share orders with friends and family.
 - Browse and view orders shared by others.
 - See a list of restaurants that we have recorded favorite orders at.
@@ -57,7 +61,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Manage orders at a restaurant: open restaurant -> add, update, or remove an order -> save.
 - Text an order: open an order -> tap the text button -> choose a contact -> message is prepared and sent.
 - Sign up: open app -> create account -> land on restaurant list.
-- Add a favorite order: open app -> tap add -> enter restaurant and order details -> save.
+- Add a favorite order: open app -> tap add -> select an existing restaurant or create a new one -> add order items (quantity defaults to 1) and customize each item (remove, add, substitute) -> save.
 - Share an order: open an order -> tap share -> choose friends/family or a share link.
 - Share an order with another app user: open an order -> tap share -> select a friend -> order appears in their shared orders and they are notified.
 - Add a friend: open friends -> search by name, email, or phone -> send request -> they accept -> they can now share orders with each other.
@@ -68,7 +72,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Frontend: Vue (Ionic Vue) with TypeScript.
 - Native layer: Capacitor for iOS and Android builds, plus a PWA.
 - Backend: Node.js HTTP/JSON API server (`server/`) using the built-in `node:http` and `node:sqlite` modules (Node 22.13+), with no external runtime dependencies.
-- Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants, orders, friendships, and order shares.
+- Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants, orders (belonging to a restaurant), order items (belonging to an order, with a quantity defaulting to 1), order item customizations (remove, add, or substitute), friendships, and order shares.
 - Auth: email/password accounts with scrypt-hashed passwords; sign-in returns a bearer token stored by the client and sent in the `Authorization` header.
 - Access control: enforced in the API so users only see their own restaurants and orders plus orders shared with them by accepted friends; shared orders are read-only for recipients.
 - Client configuration: the app reaches the API at `VITE_API_URL` (default `http://localhost:3000`).

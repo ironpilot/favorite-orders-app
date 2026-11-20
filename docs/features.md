@@ -37,13 +37,13 @@ Core product features extracted from `spec.md`, kept high level and product-focu
 
 ## 3. Manage Favorite Orders
 
-**Description:** Users can add, update, and remove favorite orders at each restaurant. An order includes the restaurant, items, customizations, and notes. Orders are private until shared. For each restaurant, the user can mark one order as the default, which is used for the preview on the restaurant list.
+**Description:** Users can add, update, and remove favorite orders at each restaurant. Orders are sub-items of a restaurant: each restaurant can have multiple orders, and each order can be modified individually without changing the restaurant. An order has a list of items, each with a quantity (default 1) and optional customizations (removals, additions, substitutions, e.g. a Hamburger with No Lettuce, add Onions, Mayonnaise instead of Ketchup), plus notes. Orders are private until shared. For each restaurant, the user can mark one order as the default, which is used for the preview on the restaurant list.
 
 **User flows:**
 
 *Add a favorite order*
 1. User opens the app and taps add.
-2. User enters the restaurant and the order details.
+2. User selects an existing restaurant or creates a new one, then adds items (quantity defaults to 1) and customizes each item.
 3. User saves.
 
 *Manage orders at a restaurant*
@@ -53,7 +53,8 @@ Core product features extracted from `spec.md`, kept high level and product-focu
 
 **UI overview:**
 - A prominent add button.
-- A form for the restaurant, items, customizations, and notes.
+- A restaurant picker that also allows creating a new restaurant.
+- An order form with a list of items, a quantity per item (default 1), per-item customizations (remove, add, substitute), and notes.
 - A way to mark one order at a restaurant as the default.
 - A simple order detail view with a share action.
 
