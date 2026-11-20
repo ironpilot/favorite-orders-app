@@ -11,20 +11,28 @@
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
-      <div
-        v-if="loading"
-        class="ion-text-center"
+      <ion-refresher
+        slot="fixed"
+        data-testid="orders-refresher"
+        @ion-refresh="onRefresh"
       >
-        <ion-spinner />
-      </div>
+        <ion-refresher-content />
+      </ion-refresher>
       <p
-        v-else-if="errorMessage"
+        v-if="errorMessage"
         data-testid="load-error"
       >
         <ion-text color="danger">
           {{ errorMessage }}
         </ion-text>
       </p>
+      <div
+        v-if="loading && !loaded"
+        class="ion-text-center"
+      >
+        <ion-spinner />
+      </div>
+      <template v-else-if="!loaded" />
       <p
         v-else-if="orders.length === 0"
         data-testid="no-orders"
@@ -32,13 +40,24 @@
         No orders saved here yet.
       </p>
       <ion-list v-else>
+        <p
+          v-if="!orders.some((o) => o.isDefault)"
+          class="hint"
+          data-testid="no-default"
+        >
+          No default order set. Open an order to make it the default.
+        </p>
         <ion-item
           v-for="order in orders"
           :key="order.id"
+          button
           data-testid="order-item"
+          @click="openOrder(order)"
         >
           <ion-label class="ion-text-wrap">
-            <h2>{{ order.title || 'Order' }}</h2>
+            <h2 data-testid="order-label">
+              {{ orderLabel(order) }}
+            </h2>
             <p data-testid="order-items">
               {{ order.items.map(formatItem).join(', ') }}
             </p>
@@ -53,6 +72,16 @@
           >
             Default
           </ion-badge>
+          <ion-button
+            v-else
+            slot="end"
+            fill="clear"
+            size="small"
+            data-testid="make-default"
+            @click.stop="makeDefault(order)"
+          >
+            Make default
+          </ion-button>
         </ion-item>
       </ion-list>
       <ion-fab
@@ -91,11 +120,22 @@ import {
   IonFab,
   IonFabButton,
   IonIcon,
+  IonButton,
+  IonRefresher,
+  IonRefresherContent,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import { add } from 'ionicons/icons';
 import { useRoute, useRouter } from 'vue-router';
-import { fetchRestaurant, fetchRestaurantOrders, formatItem, type Order, type Restaurant } from '@/services/restaurants';
+import {
+  fetchRestaurant,
+  fetchRestaurantOrders,
+  formatItem,
+  orderLabel,
+  setDefaultOrder,
+  type Order,
+  type Restaurant,
+} from '@/services/restaurants';
 
 const props = defineProps<{ id?: string }>();
 const route = useRoute();
@@ -105,19 +145,52 @@ const restaurantId = props.id ?? String(route.params.id);
 const restaurant = ref<Restaurant | null>(null);
 const orders = ref<Order[]>([]);
 const loading = ref(true);
+const loaded = ref(false);
 const errorMessage = ref('');
 
-async function load() {
-  errorMessage.value = '';
+/** Reloads the page; on failure the previous orders stay visible and an error is shown. */
+async function load(): Promise<boolean> {
+  loading.value = true;
   try {
-    [restaurant.value, orders.value] = await Promise.all([
+    const [r, o] = await Promise.all([
       fetchRestaurant(restaurantId),
       fetchRestaurantOrders(restaurantId),
     ]);
+    restaurant.value = r;
+    orders.value = o ?? [];
+    loaded.value = true;
+    errorMessage.value = '';
+    return true;
   } catch (e) {
-    errorMessage.value = e instanceof Error ? e.message : 'Could not load orders';
+    const reason = e instanceof Error ? e.message : '';
+    errorMessage.value = loaded.value
+      ? `Could not refresh orders${reason ? `: ${reason}` : ''}. Showing the last loaded list.`
+      : reason || 'Could not load orders';
+    return false;
   } finally {
     loading.value = false;
+  }
+}
+
+async function onRefresh(event: CustomEvent) {
+  try {
+    await load();
+  } finally {
+    (event.target as HTMLIonRefresherElement | null)?.complete?.();
+  }
+}
+
+function openOrder(order: Order) {
+  router.push(`/tabs/restaurants/${restaurantId}/orders/${order.id}`);
+}
+
+async function makeDefault(order: Order) {
+  try {
+    await setDefaultOrder(order.id);
+    orders.value = orders.value.map((o) => ({ ...o, isDefault: o.id === order.id }));
+    errorMessage.value = '';
+  } catch (e) {
+    errorMessage.value = e instanceof Error ? e.message : 'Could not change the default order';
   }
 }
 
@@ -127,4 +200,14 @@ function addOrder() {
 
 onIonViewWillEnter(load);
 load();
+
+defineExpose({ orders, load, onRefresh, makeDefault });
 </script>
+
+<style scoped>
+.hint {
+  font-size: 0.85rem;
+  color: var(--ion-color-medium);
+  margin: 4px 16px;
+}
+</style>

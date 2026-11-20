@@ -110,6 +110,59 @@ describe('default orders', () => {
     assert.deepEqual((await call('GET', '/api/restaurants', { token })).data[0].defaultItems, ['Sesame']);
   });
 
+  it('marking another order as the default makes only that one the default', async () => {
+    const { token } = await signUp('switchdefault@example.com');
+    const a = await saveOrder(token, 'Cafe', { items: ['Latte'] });
+    const b = await saveOrder(token, 'Cafe', { items: ['Mocha'] });
+    const res = await call('PATCH', `/api/orders/${b.id}`, { token, body: { isDefault: true } });
+    assert.equal(res.status, 200);
+    const orders = (await call('GET', `/api/restaurants/${a.restaurantId}/orders`, { token })).data;
+    assert.deepEqual(orders.filter((o) => o.isDefault).map((o) => o.id), [b.id]);
+    assert.deepEqual((await call('GET', '/api/restaurants', { token })).data[0].defaultItems, ['Mocha']);
+  });
+
+  it('editing one order leaves the restaurant and other orders unchanged and bumps its updated time', async () => {
+    const { token } = await signUp('editone@example.com');
+    const a = await saveOrder(token, 'Grill', { items: ['Steak'], title: 'Date night' });
+    const b = await saveOrder(token, 'Grill', { items: ['Burger'], notes: 'Medium' });
+    const before = (await call('GET', `/api/restaurants/${a.restaurantId}`, { token })).data;
+    await new Promise((r) => setTimeout(r, 5));
+    const edited = (await call('PATCH', `/api/orders/${b.id}`, {
+      token,
+      body: {
+        title: 'Lunch',
+        notes: 'Well done',
+        items: [{ name: 'Burger', quantity: 2, customizations: [{ kind: 'remove', ingredient: 'Pickles' }] }],
+      },
+    })).data;
+    assert.equal(edited.title, 'Lunch');
+    assert.equal(edited.notes, 'Well done');
+    assert.deepEqual(edited.items, [{ name: 'Burger', quantity: 2, customizations: [{ kind: 'remove', ingredient: 'Pickles' }] }]);
+    assert.ok(edited.updatedAt > b.updatedAt);
+    assert.equal(edited.restaurantId, a.restaurantId);
+    const otherAfter = (await call('GET', `/api/orders/${a.id}`, { token })).data;
+    assert.deepEqual(otherAfter, a);
+    // Only the activity time may change; the restaurant itself stays the same.
+    const after = (await call('GET', `/api/restaurants/${a.restaurantId}`, { token })).data;
+    assert.deepEqual({ ...after, updatedAt: undefined }, { ...before, updatedAt: undefined });
+    const noItems = await call('PATCH', `/api/orders/${b.id}`, { token, body: { items: [] } });
+    assert.equal(noItems.status, 400);
+  });
+
+  it('deleting the default promotes the most recently updated remaining order', async () => {
+    const { token } = await signUp('promote@example.com');
+    const a = await saveOrder(token, 'Sushi', { items: ['Roll A'] });
+    const b = await saveOrder(token, 'Sushi', { items: ['Roll B'] });
+    await new Promise((r) => setTimeout(r, 5));
+    const c = await saveOrder(token, 'Sushi', { items: ['Roll C'] });
+    await new Promise((r) => setTimeout(r, 5));
+    await call('PATCH', `/api/orders/${b.id}`, { token, body: { notes: 'Extra ginger' } });
+    assert.equal((await call('DELETE', `/api/orders/${a.id}`, { token })).status, 204);
+    const orders = (await call('GET', `/api/restaurants/${a.restaurantId}/orders`, { token })).data;
+    assert.deepEqual(orders.filter((o) => o.isDefault).map((o) => o.id), [b.id]);
+    assert.ok(orders.some((o) => o.id === c.id && !o.isDefault));
+  });
+
   it('returns empty default items when no order is marked default', async () => {
     const { token } = await signUp('nodefault@example.com');
     const o = await saveOrder(token, 'Deli');

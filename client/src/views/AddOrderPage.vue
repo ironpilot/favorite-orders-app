@@ -5,7 +5,9 @@
         <ion-buttons slot="start">
           <ion-back-button default-href="/tabs/restaurants" />
         </ion-buttons>
-        <ion-title>Add order</ion-title>
+        <ion-title data-testid="form-title">
+          {{ editingId ? 'Edit order' : 'Add order' }}
+        </ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
@@ -20,10 +22,19 @@
           label-placement="stacked"
           placeholder="e.g. Taco Spot"
           :maxlength="LIMITS.restaurantName"
+          :readonly="!!editingId"
+          :disabled="!!editingId"
           data-testid="restaurant-input"
         />
         <p
-          v-if="selectedRestaurant"
+          v-if="editingId"
+          class="hint"
+          data-testid="restaurant-locked"
+        >
+          The restaurant can't be changed on an existing order.
+        </p>
+        <p
+          v-else-if="selectedRestaurant"
           class="hint"
           data-testid="restaurant-picked"
         >
@@ -37,7 +48,7 @@
           Pick a suggestion, or save to use "{{ restaurantName.trim() }}" as your own restaurant.
         </p>
         <ion-list
-          v-if="!selectedRestaurant && restaurantSuggestions.length > 0"
+          v-if="!editingId && !selectedRestaurant && restaurantSuggestions.length > 0"
           data-testid="restaurant-suggestions"
         >
           <ion-item
@@ -262,8 +273,10 @@ import { add, close, remove } from 'ionicons/icons';
 import { useRoute, useRouter } from 'vue-router';
 import {
   LIMITS,
+  fetchOrder,
   fetchRestaurant,
   saveOrder,
+  updateOrder,
   suggestRestaurants,
   suggestToppings,
   type Restaurant,
@@ -306,8 +319,13 @@ const errorMessage = ref('');
 
 let suggestionRequest = 0;
 
+/** Set when editing an existing order; the restaurant is then fixed. */
+const editingId = typeof route?.params.orderId === 'string' && route.params.orderId ? route.params.orderId : null;
+const editingRestaurantId = editingId ? String(route.params.id) : null;
+
 /** Typing changes the restaurant back to a new, user-created one until a suggestion is picked. */
 watch(restaurantName, async (value) => {
+  if (editingId) return;
   if (selectedRestaurant.value && selectedRestaurant.value.name === value) return;
   selectedRestaurant.value = null;
   const q = value.trim();
@@ -330,8 +348,28 @@ function pickRestaurant(r: Restaurant) {
   restaurantSuggestions.value = [];
 }
 
-// Opening the form from a restaurant preselects it.
-if (typeof route?.query.restaurantId === 'string' && route.query.restaurantId) {
+// Editing loads the order and its (fixed) restaurant.
+if (editingId && editingRestaurantId) {
+  Promise.all([fetchOrder(editingId), fetchRestaurant(editingRestaurantId)])
+    .then(([order, r]) => {
+      selectedRestaurant.value = r;
+      restaurantName.value = r.name;
+      title.value = order.title ?? '';
+      notes.value = order.notes ?? '';
+      items.value = order.items.map((it) => ({
+        key: nextKey++,
+        name: it.name,
+        quantity: it.quantity,
+        customizations: it.customizations.map((c) => ({
+          key: nextKey++, kind: c.kind, ingredient: c.ingredient, insteadOf: c.insteadOf ?? '',
+        })),
+      }));
+    })
+    .catch((e) => {
+      errorMessage.value = e instanceof Error ? e.message : 'Could not load order';
+    });
+} else if (typeof route?.query.restaurantId === 'string' && route.query.restaurantId) {
+  // Opening the form from a restaurant preselects it.
   fetchRestaurant(route.query.restaurantId)
     .then((r) => {
       if (r) pickRestaurant(r);
@@ -431,6 +469,17 @@ async function submit() {
     return;
   }
   saving.value = true;
+  if (editingId) {
+    try {
+      await updateOrder(editingId, { title: title.value.trim(), items: built, notes: notes.value.trim() });
+      await router.replace(`/tabs/restaurants/${editingRestaurantId}/orders/${editingId}`);
+    } catch (e) {
+      errorMessage.value = e instanceof Error ? e.message : 'Could not save order';
+    } finally {
+      saving.value = false;
+    }
+    return;
+  }
   try {
     const order = await saveOrder({
       ...(selectedRestaurant.value ? { restaurantId: selectedRestaurant.value.id } : { restaurantName: name }),
@@ -447,7 +496,7 @@ async function submit() {
 }
 
 defineExpose({
-  restaurantName, selectedRestaurant, restaurantSuggestions, pickRestaurant, toppingSuggestions, loadToppings, pickTopping,
+  editingId, restaurantName, selectedRestaurant, restaurantSuggestions, pickRestaurant, toppingSuggestions, loadToppings, pickTopping,
   title, items, notes, addItem, removeItem, changeQuantity, addCustomization, removeCustomization, submit,
 });
 </script>

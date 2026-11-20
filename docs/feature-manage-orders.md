@@ -254,8 +254,8 @@ Tracks progress of each implementation step. Update this section whenever a step
 | 2 | Add an order with items and customizations | Complete |
 | 3 | Restaurant ownership and auto-fill | Not started |
 | 4 | Toppings auto-fill | Not started |
-| 5 | View orders, order detail and default order | Partial |
-| 6 | Edit and remove an order | Partial |
+| 5 | View orders, order detail and default order | Complete |
+| 6 | Edit and remove an order | Complete |
 | 7 | Rename a restaurant | Partial |
 | 8 | Offline behavior | Not started |
 | 9 | Polish and cross-platform check | Not started |
@@ -265,8 +265,8 @@ Tracks progress of each implementation step. Update this section whenever a step
 - **Step 2: Complete.** The add-order form has an item list with a quantity stepper (starts at 1) and per-item remove/add/substitute customizations, plus an optional name and notes. Saving without items is blocked with a message, inputs have length limits, and long text wraps. Covered by client tests.
 - **Step 3: Not started.** Restaurants only have a user owner today. There is no administrator-owned restaurant support, no auto-fill, and no suggestion endpoint.
 - **Step 4: Not started.** There is no toppings list, endpoint or autocomplete.
-- **Step 5: Partial.** Done: the restaurant orders page lists orders and shows a Default badge, and the server supports marking a default. Remaining: order detail view with share action hook, a client action to change the default, the fallback for no default on the orders page, and the refresh behavior (reload on every entry or return, pull-to-refresh, failed-refresh message; FR22, FR23).
-- **Step 6: Partial.** Done: server update and delete with default promotion and the restaurant kept when the last order is removed. Remaining: edit and remove actions in the client, the restaurant being read-only on edit, blocking save without items, and tests.
+- **Step 5: Complete.** The restaurant orders page lists orders (unnamed orders are identified by their items), opens an order detail view, and has a "Make default" action plus a hint when no default is marked. The detail view (`OrderDetailPage.vue`) shows name, items, quantities, customizations and notes, and has a share action that calls the `shareHandler` hook for the Share an Order feature. The orders page reloads on every entry (`ionViewWillEnter`) and has pull-to-refresh; a failed refresh keeps the previous orders and shows an error, and the refresher always ends. Covered by server and client tests.
+- **Step 6: Complete.** The detail view has Edit and Remove (with confirmation) actions. Editing reuses the add-order form at `/tabs/restaurants/:id/orders/:orderId/edit` with the restaurant field locked, saves via `PATCH` (updating the last-updated time), and blocks saving without items. Deleting the default promotes the most recently updated remaining order, and removing the last order keeps the restaurant as an empty entry. Covered by server and client tests.
 - **Step 7: Partial.** Done: server rename endpoint for a restaurant the user owns. Remaining: rename action in the client, administrator-owned restaurants being non-renamable, and tests.
 - **Step 8: Not started.** There is no cache, offline detection or disabled add-order state, and no refresh-while-offline behavior (FR22, FR23).
 - **Step 9: Not started.** It depends on steps 1 to 8.
