@@ -34,7 +34,7 @@ Only include features that are clearly described in spec.md. Do not invent new f
 
 - Generate a prompt to create an overall app layout for our project, including logo (text based), menu items, create log entry button, and main slot content area. This should be design based only and not functional yet. We're scaffolding our boilerplate.
 
-## Extract Features
+## Extract Feature Plans
 
 ```
 Extract the feature [feature] from features.md into its own markdown document, feature-[FEATURE_NAME].md.
