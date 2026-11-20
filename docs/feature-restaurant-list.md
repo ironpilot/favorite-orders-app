@@ -22,7 +22,7 @@ The Restaurant List is the main screen users see after opening the app or signin
 7. **List stays in sync with orders:** Adding an order at a new restaurant makes that restaurant appear in the list. Removing the last order at a restaurant keeps the restaurant in the list as an empty entry until the user removes it explicitly.
 8. **Privacy:** The list shows only the user's own orders and the restaurants they are recorded at (administrator-owned or user-created); other users' restaurants are never shown. Orders are private to the owner until shared.
 9. **Navigation:** The list is reachable through navigation suited to one-handed phone use, such as bottom tabs or a menu.
-10. **Offline viewing:** The user can view the list of saved restaurants and their orders while offline (read-only). Actions that create, edit, or delete orders require a connection. While offline, the "add order" action is disabled and a message explains that a connection is needed.
+10. **Offline viewing:** The user can view the list of saved restaurants and their orders while offline (read-only). Actions that create, edit, or delete orders require a connection. While offline, the "add order" action is disabled and a message explains that a connection is needed. A refresh while offline keeps the cached list and shows a message that a connection is needed.
 11. **Empty state:** When the user has no recorded restaurants, the list shows an empty state that points them to add their first order.
 12. **Search:** The user can search the list by restaurant name or by item name in its orders (e.g. searching "burger" finds restaurants with burger orders).
 13. **Sorting:** The user can sort the list. The default is most recently updated first, with an A–Z option.
@@ -30,6 +30,8 @@ The Restaurant List is the main screen users see after opening the app or signin
 15. **Empty restaurant entry:** A restaurant with no orders shows its name and a prompt to add an order instead of a key-items preview.
 16. **Duplicate names:** Restaurants with different spellings are treated as separate entries; names are not merged.
 17. **Rename a restaurant:** The user can rename a restaurant they created. Its orders stay attached, and the list shows the new name. Administrator-owned restaurants cannot be renamed by users.
+18. **Refresh on entry:** The restaurant list reloads its data every time the user enters or returns to the page (first entry, back navigation, switching tabs, returning from the add, edit or remove flows). The refresh keeps the current search text and sort choice. If the refresh fails, the previous content stays visible and an error message is shown.
+19. **Pull to refresh:** The user can pull down on the list to reload it on demand, using the Ionic refresher. A failed or offline pull-to-refresh keeps the current list and shows a non-destructive message.
 
 ### Constraints and Assumptions
 - Mobile-first, built with Ionic, with acceptable layout on tablet and desktop.
@@ -55,6 +57,9 @@ The Restaurant List is the main screen users see after opening the app or signin
 - A restaurant renamed to the same name as another restaurant.
 - A user tries to rename or remove an administrator-owned restaurant (not allowed).
 - A user-created restaurant has the same name as an administrator-owned one (both can appear as separate entries).
+- A refresh fails (the previous list stays visible and an error message is shown).
+- A refresh happens while offline (the cached list stays and a connection-needed message is shown).
+- A refresh happens while a search or sort is active (the search text and sort choice are kept).
 
 ### Decisions
 - A lone order is the default; when the default is deleted, the most recently updated remaining order becomes the default.
@@ -63,6 +68,8 @@ The Restaurant List is the main screen users see after opening the app or signin
 - The order count includes only the user's own orders.
 - Search matches restaurant names and item names.
 - Restaurants are administrator-owned (read-only for users) or user-created; no "Add a restaurant" button is provided.
+- Refresh on entry means every page activation (Ionic `ionViewWillEnter` style), not only the first mount.
+- Pull-to-refresh applies to all list pages in the app.
 
 ### Open Questions
 None at this time.
@@ -83,6 +90,7 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 | 6. Remove a restaurant | Partial |
 | 7. Offline support | Not started |
 | 8. Polish and cross-platform check | Not started |
+| 9. Refresh on entry and pull to refresh | Not started |
 
 ### Step 1: Restaurant data and list screen skeleton
 - **Status:** Complete. Server restaurant/order data, list page, bottom tabs, landing redirect and per-user filtering are implemented with unit and API tests.
@@ -98,6 +106,8 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 - The order count includes only the user's own orders.
 - The list shows only the current user's restaurants.
 - The list is reachable through bottom tabs or a menu.
+
+Refresh on entry and pull to refresh (FR18, FR19) are added in Step 9.
 
 ### Step 2: Default order and key-items preview
 - **Status:** Complete. The server stores one default order per restaurant, the list shows its items, and the fallback text is shown otherwise. Preview and fallback have unit tests.
@@ -188,6 +198,7 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 - The add-order action is disabled while offline and a message explains why.
 - Edit and delete actions are disabled while offline.
 - Actions are enabled again when the connection returns.
+- Refreshing while offline keeps the cached list and shows a connection-needed message (FR10, FR18, FR19; see Step 9).
 
 ### Step 8: Polish and cross-platform check
 - **Status:** Not started. It depends on steps 3 to 7.
@@ -200,3 +211,20 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 - The list works on iOS, Android and the PWA.
 - The list stays usable with about 100 restaurants.
 - Each edge case in the Edge Cases section is checked.
+
+### Step 9: Refresh on entry and pull to refresh
+- **Status:** Not started. The list loads its data once when the page is created and has no refresher.
+- **Outcome:** The list reloads every time the user enters or returns to it, and the user can pull down to reload on demand.
+- **Covers:** FR18, FR19, FR10 (refresh while offline)
+- **Decision:** Refresh runs on every page activation, not only first mount, and uses the Ionic refresher for pull-to-refresh. A refresh keeps the search text and sort choice, and never clears the visible list on failure or while offline.
+- **Acceptance check:** Returning from the add, edit or remove flows shows the change without a manual action. Pulling down reloads the list. A failed or offline refresh keeps the previous list and shows a message.
+
+#### Tests
+- The list reloads on first entry.
+- The list reloads when the user returns by back navigation or by switching tabs.
+- After adding, editing or removing an order or restaurant and returning, the list shows the change.
+- Pulling down reloads the list and ends the refresher when done.
+- A refresh keeps the current search text and sort choice.
+- A failed refresh keeps the previous list visible and shows an error message.
+- A refresh while offline keeps the cached list and shows a connection-needed message.
+- A failed or offline pull-to-refresh ends the refresher and shows a non-destructive message.

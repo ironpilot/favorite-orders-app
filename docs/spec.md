@@ -37,6 +37,9 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Orders are private by default and visible only to the owner until shared.
 - User-created restaurants are entered manually by the user (no external places lookup).
 - Administrator-owned restaurants and the common toppings list are managed by the administrator, outside the user-facing app.
+- Refresh on entry: the restaurant list and the restaurant's orders page (order list) reload their data every time the user enters or returns to the page (first entry, back navigation, switching tabs, returning from add, edit or remove flows). A refresh keeps the current search text and sort choice.
+- Pull to refresh: every list page (restaurant list, restaurant orders list, Shared orders list, friends list) supports pull-to-refresh so the user can reload on demand.
+- A failed refresh keeps the previous content visible and shows an error message. A refresh while offline keeps the cached data and shows a message that a connection is needed.
 
 ### Non-Functional Requirements
 - Mobile-first design: layouts and interactions are designed for phones first.
@@ -47,6 +50,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Platforms: iOS, Android, and a PWA.
 - While offline, the "add order" button is disabled with a message explaining a connection is needed.
 - The restaurant list is sized for up to roughly 100 restaurants; no special large-list handling.
+- Refreshed data is shown without blocking the UI; the previous content stays visible while a refresh runs.
 
 ## Features
 - **Share an Order with Another User (Primary Feature)**: Share a favorite order directly with another user in the app so they can view it and save it to their own orders.
@@ -76,6 +80,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Share an order with another app user: open an order -> tap share -> select a friend -> order appears in their shared orders and they are notified.
 - Add a friend: open friends -> search by name, email, or phone -> send request -> they accept -> they can now share orders with each other.
 - Browse shared orders: open feed -> select a restaurant or person -> view order details.
+- Refresh a list: enter or return to a list page (the list reloads automatically) -> or pull down on the list -> the content reloads; if it fails or the device is offline, the previous content stays and a message is shown.
 
 ## Technical Decisions
 - UI framework: Ionic (mobile-first components and navigation).
@@ -97,6 +102,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Bottom tab or menu navigation suited to one-handed mobile use.
 - List/card views of restaurants with name, order count, and default-order items; empty restaurants show a prompt to add an order.
 - Search field and sort option on the restaurant list.
+- Pull-to-refresh (Ionic refresher) on all list pages: restaurant list, restaurant orders list, Shared orders list and friends list.
 - Tabs include a separate Shared tab for orders from friends.
 - Prominent "add order" action button; no "Add a restaurant" button.
 - Restaurant auto-fill in the add-order form and common-toppings auto-fill on item customizations.

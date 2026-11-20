@@ -36,6 +36,8 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 19. **Restaurant ownership:** A restaurant is either administrator-owned or user-created. Administrator-owned restaurants are pre-populated, are not editable (renamed or removed) by users, and are available to all users. User-created restaurants belong to the user who created them and are visible only to that user.
 20. **Restaurant auto-fill:** In the add-order restaurant field, suggestions appear as the user types, matching both administrator-owned restaurants and the user's own restaurants. If the user picks a suggestion, the order is saved under that restaurant. If no suggestion is chosen, the typed name creates a new user-created restaurant when the order is saved.
 21. **Toppings auto-fill:** When adding a customization (removal, addition or substitution) to an item, the text field offers an autocomplete of common toppings (e.g. Lettuce, Onions, Ketchup, Mayonnaise). The list is predefined and maintained by the administrator. The user can still type any free text that is not in the list.
+22. **Order list refresh on entry:** The restaurant's orders page (the order list) reloads its contents every time the user enters or returns to it (first entry, back navigation, switching tabs, returning from the add, edit or delete flows). The refresh keeps the current search text and sort choice where the page has them. If the refresh fails, the previous content stays visible and an error message is shown.
+23. **Pull to refresh:** The user can pull down on the restaurant orders page to reload it on demand, using the Ionic refresher. A failed or offline pull-to-refresh keeps the current list and shows a non-destructive message. While offline, a refresh keeps the cached orders and shows a message that a connection is needed.
 
 ### Constraints and Assumptions
 - Mobile-first, built with Ionic, with acceptable layout on tablet and desktop.
@@ -52,7 +54,7 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 - **Restaurant List:** shows the restaurants created here, the order count, and the default order's items, and is the starting point for adding an order and opening a restaurant.
 - **Share an Order with Another User:** uses the share action on the order detail view. Only accepted friends can receive a shared order.
 - **Text an Order:** uses the text button on the order detail view.
-- **Browse Shared Orders:** shared orders appear there, not among the user's own orders.
+- **Browse Shared Orders:** shared orders appear there, not among the user's own orders. The Shared list also gets pull-to-refresh; that is owned by the Browse Shared Orders feature. The same applies to any other list page, such as the friends list.
 
 ### Edge Cases
 - A new user with no restaurants adds a first order, creating a restaurant in the same flow.
@@ -71,6 +73,10 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 - A user tries to rename or remove an administrator-owned restaurant (not allowed).
 - A topping typed by the user is not in the common toppings list (accepted as free text).
 - A user-created restaurant has the same name as an administrator-owned restaurant (both appear in suggestions).
+- The user returns from editing or deleting an order and sees the change without a manual refresh.
+- A refresh of the orders page fails (the previous orders stay visible and an error message is shown).
+- A refresh of the orders page happens while offline (the cached orders stay and a connection-needed message is shown).
+- A refresh happens while a search or sort is active (the search text and sort choice are kept).
 
 ### Decisions
 - A lone order is the default; when the default is deleted, the most recently updated remaining order becomes the default.
@@ -85,6 +91,8 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 - Restaurants are administrator-owned (read-only for users) or user-created.
 - Restaurant auto-fill and toppings auto-fill are suggestions only; free text is always allowed.
 - No order history or versioning at this time.
+- Refresh on entry means every page activation (Ionic `ionViewWillEnter` style), not only the first mount.
+- Pull-to-refresh applies to all list pages in the app.
 
 ### Open Questions
 None at this time.
@@ -166,7 +174,7 @@ Each step is a usable increment that builds on the previous one and is small eno
 
 ### Step 5: View orders, order detail and default order
 - **Outcome:** The user opens a restaurant to see its orders, opens an order detail view, and can mark one order as the default.
-- **Covers:** FR5, FR13, FR14
+- **Covers:** FR5, FR13, FR14, FR22, FR23
 - **Decision:** A lone order is the default. The detail view shows items, quantities, customizations, name and notes, and has a share action that is a hook for the Share an Order feature.
 - **Acceptance check:** The restaurant orders page lists its orders, the detail view shows everything, and changing the default updates the preview on the restaurant list.
 
@@ -178,6 +186,11 @@ Each step is a usable increment that builds on the previous one and is small eno
 - Marking another order as the default makes only that one the default.
 - The share action is present on the detail view.
 - A restaurant with orders but no default marked does not break the page.
+- The orders page reloads on first entry and on every return (back navigation, tab switch, return from add, edit or delete).
+- After editing or deleting an order and returning, the page shows the change.
+- Pulling down on the orders page reloads it and ends the refresher when done.
+- A failed refresh keeps the previous orders visible and shows an error message.
+- A failed pull-to-refresh ends the refresher and shows a non-destructive message.
 
 ### Step 6: Edit and remove an order
 - **Outcome:** The user can edit any order independently and remove an order, with default handling.
@@ -208,7 +221,7 @@ Each step is a usable increment that builds on the previous one and is small eno
 
 ### Step 8: Offline behavior
 - **Outcome:** Saved restaurants and orders can be viewed offline, read-only.
-- **Covers:** FR16
+- **Covers:** FR16, FR22, FR23 (refresh while offline)
 - **Decision:** Reads are cached locally. Create, edit and delete need a connection, and there is no offline write queue.
 - **Acceptance check:** With no connection, orders load from the cache, and add, edit and delete are disabled with a message that a connection is needed.
 
@@ -218,6 +231,7 @@ Each step is a usable increment that builds on the previous one and is small eno
 - Edit, delete and default actions are disabled while offline.
 - Actions are enabled again when the connection returns.
 - Toppings and restaurant auto-fill do not break the form when offline.
+- Refreshing the orders page (on entry or by pull-to-refresh) while offline keeps the cached orders and shows a connection-needed message.
 
 ### Step 9: Polish and cross-platform check
 - **Outcome:** The feature works well across devices and platforms and handles the listed edge cases.
@@ -251,8 +265,8 @@ Tracks progress of each implementation step. Update this section whenever a step
 - **Step 2: Complete.** The add-order form has an item list with a quantity stepper (starts at 1) and per-item remove/add/substitute customizations, plus an optional name and notes. Saving without items is blocked with a message, inputs have length limits, and long text wraps. Covered by client tests.
 - **Step 3: Not started.** Restaurants only have a user owner today. There is no administrator-owned restaurant support, no auto-fill, and no suggestion endpoint.
 - **Step 4: Not started.** There is no toppings list, endpoint or autocomplete.
-- **Step 5: Partial.** Done: the restaurant orders page lists orders and shows a Default badge, and the server supports marking a default. Remaining: order detail view with share action hook, a client action to change the default, and the fallback for no default on the orders page.
+- **Step 5: Partial.** Done: the restaurant orders page lists orders and shows a Default badge, and the server supports marking a default. Remaining: order detail view with share action hook, a client action to change the default, the fallback for no default on the orders page, and the refresh behavior (reload on every entry or return, pull-to-refresh, failed-refresh message; FR22, FR23).
 - **Step 6: Partial.** Done: server update and delete with default promotion and the restaurant kept when the last order is removed. Remaining: edit and remove actions in the client, the restaurant being read-only on edit, blocking save without items, and tests.
 - **Step 7: Partial.** Done: server rename endpoint for a restaurant the user owns. Remaining: rename action in the client, administrator-owned restaurants being non-renamable, and tests.
-- **Step 8: Not started.** There is no cache, offline detection or disabled add-order state.
+- **Step 8: Not started.** There is no cache, offline detection or disabled add-order state, and no refresh-while-offline behavior (FR22, FR23).
 - **Step 9: Not started.** It depends on steps 1 to 8.
