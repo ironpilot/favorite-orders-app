@@ -33,7 +33,9 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Text our order to a friend from a single button click.
 - Account creation and user sign-up experience.
 - Share an order with another user in the app (primary feature).
-- Friends system: users send and accept friend requests; orders can only be shared with accepted friends.
+- Friends system: users search by email or phone, send, cancel, accept, or decline friend requests (declines are silent), and can remove friends. Removing a friend revokes their access to shared orders; saved copies remain. Friend requests and acceptances trigger push notifications.
+- Direct sharing is only with accepted friends; multiple friends can be selected, and already-shared friends are marked. Recipients get a push notification, see the owner's latest version (deleted orders disappear), and can save a copy (restaurant matched by name or newly created). Owners can unshare.
+- Share links: the owner generates a link with an owner-chosen expiry (or none). It is reusable by anyone signed in, grants read-only access without friendship, and openers can save the order. Without the app, the opener is sent to the app store or PWA and the link resumes. Non-friend openers are prompted to send a friend request; if the owner declines, the order is removed from the opener's Shared tab, and if the prompt is skipped it stays. The owner sees who opened the link and can disable it or remove individual openers. Expired or disabled links show a no-longer-valid message. Unfriending an opener revokes their access.
 - Orders are private by default and visible only to the owner until shared.
 - User-created restaurants are entered manually by the user (no external places lookup).
 - Administrator-owned restaurants and the common toppings list are managed by the administrator, outside the user-facing app.
@@ -67,7 +69,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - No third-party places/restaurant API.
 - No "Add a restaurant" buttons; restaurants are only added when a user creates an order.
 - No order history or versioning at this time.
-- Sharing is limited to accepted friends.
+- Direct sharing is limited to accepted friends; share links are the exception.
 
 ## User Flows
 - View restaurants: open app -> see list of restaurants with order counts and default-order previews -> search or sort -> select a restaurant to see its orders.
@@ -76,9 +78,10 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Text an order: open an order -> tap the text button -> choose a contact -> message is prepared and sent.
 - Sign up: open app -> create account -> land on restaurant list.
 - Add a favorite order: open app -> tap add -> type a restaurant and pick an auto-fill suggestion (administrator-owned or own) or keep the typed name as a new one -> add order items (quantity defaults to 1) and customize each item (remove, add, substitute, with common-toppings auto-fill) -> save.
-- Share an order: open an order -> tap share -> choose friends/family or a share link.
-- Share an order with another app user: open an order -> tap share -> select a friend -> order appears in their shared orders and they are notified.
-- Add a friend: open friends -> search by name, email, or phone -> send request -> they accept -> they can now share orders with each other.
+- Share an order: open an order -> tap share -> choose friends or a share link.
+- Share an order with app users: open an order -> tap share -> select one or more friends -> order appears in their shared orders and they get a push notification.
+- Share via link: open an order -> tap share -> generate link (choose expiry) -> opener signs in and opens it -> gets read-only access -> is prompted to become friends.
+- Add a friend: open friends -> search by email or phone -> send request -> they accept or decline -> if accepted, they can share orders with each other.
 - Browse shared orders: open feed -> select a restaurant or person -> view order details.
 - Refresh a list: enter or return to a list page (the list reloads automatically) -> or pull down on the list -> the content reloads; if it fails or the device is offline, the previous content stays and a message is shown.
 
@@ -92,7 +95,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Access control: enforced in the API so users only see administrator-owned restaurants, their own restaurants and orders, plus orders shared with them by accepted friends; shared orders are read-only for recipients. Users cannot rename or remove administrator-owned restaurants.
 - Client configuration: the app reaches the API at `VITE_API_URL` (default `http://localhost:3000`).
 - Privacy: orders are private by default; sharing creates an explicit share record.
-- Friends: a friends table with pending/accepted status gates sharing.
+- Friends: a friends table with pending/accepted status gates direct sharing; share links use separate link records with expiry and opener tracking.
 - Restaurants: administrator-owned (pre-populated) or user-created free-text entries, with no external API; the add-order field auto-fills from both. Different spellings are kept as separate entries (a user-created restaurant may share a name with an administrator-owned one) and restaurants persist independently of their orders.
 - Toppings: an administrator-maintained list of common toppings served to the client for customization auto-fill; suggestions only, free text allowed.
 - Offline: read-only local cache of saved and shared orders; writes require connectivity.

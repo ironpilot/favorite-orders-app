@@ -60,33 +60,42 @@ Core product features extracted from `spec.md`, kept high level and product-focu
 
 ## 4. Friends
 
-**Description:** Users connect with friends and family through friend requests. Orders can only be shared with accepted friends.
+**Description:** Users connect with friends and family through friend requests. Orders can be shared directly only with accepted friends (share links are the exception, see feature 5).
 
 **User flow (add a friend):**
 1. User opens friends.
-2. User searches by name, email, or phone.
-3. User sends a friend request.
-4. The other person accepts.
+2. User searches by email or phone (not by name).
+3. User sends a friend request (the sender can cancel it while pending).
+4. The other person accepts or declines. A declined request is silently removed.
 5. Both can now share orders with each other.
+
+Users can also remove a friend, which revokes that person's access to orders shared with them (copies they already saved remain). Users get push notifications for incoming friend requests and acceptances.
 
 **UI overview:**
 - A friends screen with a search field.
-- Friend requests that can be sent and accepted.
+- Friend requests that can be sent, cancelled, accepted, or declined, and a way to remove a friend.
 
 ## 5. Share an Order with Another User (Primary Feature)
 
-**Description:** Users share a favorite order directly with a friend in the app. The friend can view it and save it to their own orders, and is notified when it arrives.
+**Description:** Users share a favorite order with friends in the app, or via a link. Recipients can view it (read-only, always the owner's latest version) and save it to their own orders (matched to a restaurant by name, or a new user-created one), and are notified by push when it arrives. Owners can unshare at any time.
 
 **User flow:**
 1. User opens an order.
 2. User taps share.
-3. User selects a friend.
-4. The order appears in the friend's shared orders, and the friend is notified.
+3. User selects one or more friends (already-shared friends are marked) or generates a share link.
+4. The order appears in each friend's shared orders, and each friend is notified.
+
+**Share link flow:**
+1. Owner generates a link, choosing an expiry (or none).
+2. Anyone signed in who opens it gets read-only access, and can save the order. Without the app, they are sent to the app store or PWA, and the link resumes afterwards.
+3. Non-friends are prompted to become friends with the owner; accepting sends a friend request. If the owner declines, the order is removed from the opener's Shared tab; if the opener skips the prompt, it stays.
+4. The owner sees who opened the link and can disable the link or remove individual openers. Expired or disabled links show a no-longer-valid message.
 
 **UI overview:**
 - A share action on the order detail view.
-- A friend picker.
-- A notification for the recipient.
+- A friend picker with multi-select, and a share link option.
+- A push notification for the recipient.
+- An owner view of who has access, with unshare/revoke controls.
 
 ## 6. Browse Shared Orders
 
