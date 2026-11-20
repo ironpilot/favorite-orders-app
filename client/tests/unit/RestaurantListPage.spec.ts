@@ -6,6 +6,8 @@ const state = vi.hoisted(() => ({
   userId: null as string | null,
   rows: [] as unknown[],
   calls: [] as [string, string][],
+  bodies: [] as unknown[],
+  orders: [] as unknown[],
   signUp: vi.fn(),
   signIn: vi.fn(),
 }));
@@ -40,6 +42,12 @@ vi.mock('@/lib/api', () => {
         return { token: 't', user: { id: state.userId } };
       }
       if (path === '/api/restaurants') return state.rows;
+      if (method === 'POST' && path === '/api/orders') {
+        state.bodies.push(body);
+        return { id: 'o-new', restaurantId: 'r-new', items: [], isDefault: true };
+      }
+      const m = path.match(/^\/api\/restaurants\/([^/]+)(\/orders)?$/);
+      if (m) return m[2] ? state.orders : { id: m[1], name: 'Taco Spot', updatedAt: '' };
       return undefined;
     },
   };
@@ -49,11 +57,15 @@ import RestaurantListPage from '@/views/RestaurantListPage.vue';
 import LoginPage from '@/views/LoginPage.vue';
 import { buildRouter, routes } from '@/router';
 import { fetchMyRestaurants } from '@/services/restaurants';
+import RestaurantOrdersPage from '@/views/RestaurantOrdersPage.vue';
+import AddOrderPage from '@/views/AddOrderPage.vue';
 
 beforeEach(() => {
   state.userId = null;
   state.rows = [];
   state.calls = [];
+  state.bodies = [];
+  state.orders = [];
   state.signIn.mockClear();
   state.signUp.mockClear();
 });
@@ -97,7 +109,7 @@ describe('fetchMyRestaurants', () => {
     state.rows = [{ id: 'r1', name: 'Taco Spot', updatedAt: '2026-01-01', orderCount: 2, defaultItems: [] }];
     const result = await fetchMyRestaurants();
     expect(state.calls).toContainEqual(['GET', '/api/restaurants']);
-    expect(result).toEqual([{ id: 'r1', name: 'Taco Spot', orderCount: 2, updatedAt: '2026-01-01' }]);
+    expect(result).toEqual([{ id: 'r1', name: 'Taco Spot', orderCount: 2, defaultItems: [], updatedAt: '2026-01-01' }]);
   });
 
   it('returns nothing when signed out', async () => {
@@ -121,10 +133,98 @@ describe('RestaurantListPage', () => {
     expect(counts).toEqual(['2 orders', '1 order']);
   });
 
+  it('shows the default order items as the preview', async () => {
+    state.userId = 'user-1';
+    state.rows = [{ id: 'r1', name: 'Taco Spot', updatedAt: '', orderCount: 2, defaultItems: ['Al pastor', 'Horchata'] }];
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="key-items"]').text()).toBe('Al pastor, Horchata');
+  });
+
+  it('shows a fallback for restaurants with orders but no default, and with no orders', async () => {
+    state.userId = 'user-1';
+    state.rows = [
+      { id: 'r1', name: 'Taco Spot', updatedAt: '', orderCount: 2, defaultItems: [] },
+      { id: 'r2', name: 'Pho House', updatedAt: '', orderCount: 0, defaultItems: [] },
+    ];
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    const fallbacks = wrapper.findAll('[data-testid="preview-fallback"]').map((n) => n.text());
+    expect(fallbacks).toEqual(['No default order set', 'No orders yet. Tap to add one.']);
+    expect(wrapper.find('[data-testid="key-items"]').exists()).toBe(false);
+  });
+
+  it('opens a restaurant\'s orders when selected', async () => {
+    state.userId = 'user-1';
+    state.rows = [{ id: 'r1', name: 'Taco Spot', updatedAt: '', orderCount: 1, defaultItems: ['Taco'] }];
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants');
+    const wrapper = mount(RestaurantListPage, { global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.find('[data-testid="restaurant-item"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants/r1');
+  });
+
+  it('has a prominent add-order action that starts the add-order flow', async () => {
+    state.userId = 'user-1';
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants');
+    const wrapper = mount(RestaurantListPage, { global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.find('[data-testid="add-order"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants/new-order');
+  });
+
   it('shows the empty state when the user has no restaurants', async () => {
     state.userId = 'user-1';
     const wrapper = mount(RestaurantListPage);
     await flushPromises();
     expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true);
+  });
+});
+
+describe('RestaurantOrdersPage', () => {
+  it('lists the orders saved at the restaurant', async () => {
+    state.userId = 'user-1';
+    state.orders = [{ id: 'o1', title: 'Usual', items: ['Taco', 'Soda'], notes: null, isDefault: true }];
+    const wrapper = mount(RestaurantOrdersPage, { props: { id: 'r1' } });
+    await flushPromises();
+    expect(state.calls).toContainEqual(['GET', '/api/restaurants/r1/orders']);
+    expect(wrapper.find('[data-testid="restaurant-title"]').text()).toBe('Taco Spot');
+    expect(wrapper.find('[data-testid="order-items"]').text()).toBe('Taco, Soda');
+    expect(wrapper.find('[data-testid="default-badge"]').exists()).toBe(true);
+  });
+});
+
+describe('AddOrderPage', () => {
+  async function mountForm() {
+    state.userId = 'user-1';
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/restaurants/new-order');
+    const wrapper = mount(AddOrderPage, { global: { plugins: [router] } });
+    return { router, vm: wrapper.vm as unknown as {
+      restaurantName: string; itemsText: string; submit: () => Promise<void>;
+    }, wrapper };
+  }
+
+  it('saves the order by restaurant name and opens that restaurant', async () => {
+    const { router, vm } = await mountForm();
+    vm.restaurantName = '  New Place ';
+    vm.itemsText = 'Burger\n\nFries';
+    await vm.submit();
+    await flushPromises();
+    expect(state.bodies).toEqual([{ restaurantName: 'New Place', items: ['Burger', 'Fries'] }]);
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants/r-new');
+  });
+
+  it('requires a restaurant name and at least one item', async () => {
+    const { vm, wrapper } = await mountForm();
+    vm.itemsText = 'Burger';
+    await vm.submit();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="save-error"]').exists()).toBe(true);
+    expect(state.bodies).toEqual([]);
   });
 });

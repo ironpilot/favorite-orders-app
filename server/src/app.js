@@ -100,6 +100,25 @@ export function createApp(db) {
     }
   }
 
+  // A restaurant's first order becomes its default.
+  function insertOrder(userId, restaurantId, body, transactional = true) {
+    const id = randomUUID();
+    const write = () => {
+      const hasOrders = !!one('select 1 from orders where restaurant_id = ?', restaurantId);
+      const isDefault = body.isDefault === true || !hasOrders;
+      if (isDefault) run('update orders set is_default = 0 where restaurant_id = ?', restaurantId);
+      run(
+        `insert into orders (id, owner_id, restaurant_id, title, items, customizations, notes, is_default)
+         values (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, userId, restaurantId, body.title ?? '', JSON.stringify(Array.isArray(body.items) ? body.items : []),
+        body.customizations ?? null, body.notes ?? null, isDefault ? 1 : 0,
+      );
+    };
+    if (transactional) withTransaction(write);
+    else write();
+    return { ...orderDto(one('select * from orders where id = ?', id)), restaurantId };
+  }
+
   // [method, pattern, handler, requiresAuth]
   const routes = [
     ['POST', '/api/auth/signup', ({ body }) => {
@@ -160,11 +179,9 @@ export function createApp(db) {
       }))];
     }],
 
-    ['POST', '/api/restaurants', ({ user, body }) => {
-      const id = randomUUID();
-      run('insert into restaurants (id, owner_id, name) values (?, ?, ?)', id, user.id, requireText(body.name, 'name'));
-      const r = one('select * from restaurants where id = ?', id);
-      return [201, { id: r.id, name: r.name, orderCount: 0, defaultItems: [], updatedAt: r.updated_at }];
+    ['GET', '/api/restaurants/:id', ({ user, params }) => {
+      const r = ownRestaurant(user.id, params.id);
+      return [200, { id: r.id, name: r.name, updatedAt: r.updated_at }];
     }],
 
     ['PATCH', '/api/restaurants/:id', ({ user, params, body }) => {
@@ -193,17 +210,22 @@ export function createApp(db) {
 
     ['POST', '/api/restaurants/:id/orders', ({ user, params, body }) => {
       ownRestaurant(user.id, params.id);
-      const id = randomUUID();
-      withTransaction(() => {
-        if (body.isDefault) run('update orders set is_default = 0 where restaurant_id = ?', params.id);
-        run(
-          `insert into orders (id, owner_id, restaurant_id, title, items, customizations, notes, is_default)
-           values (?, ?, ?, ?, ?, ?, ?, ?)`,
-          id, user.id, params.id, body.title ?? '', JSON.stringify(Array.isArray(body.items) ? body.items : []),
-          body.customizations ?? null, body.notes ?? null, body.isDefault ? 1 : 0,
-        );
+      return [201, insertOrder(user.id, params.id, body)];
+    }],
+
+    // Restaurants are created only by saving an order. The name is matched exactly;
+    // different spellings stay separate restaurants.
+    ['POST', '/api/orders', ({ user, body }) => {
+      const name = requireText(body.restaurantName, 'restaurantName');
+      const order = withTransaction(() => {
+        let r = one('select id from restaurants where owner_id = ? and name = ?', user.id, name);
+        if (!r) {
+          r = { id: randomUUID() };
+          run('insert into restaurants (id, owner_id, name) values (?, ?, ?)', r.id, user.id, name);
+        }
+        return insertOrder(user.id, r.id, body, false);
       });
-      return [201, orderDto(one('select * from orders where id = ?', id))];
+      return [201, order];
     }],
 
     ['GET', '/api/orders/:id', ({ user, params }) => {
@@ -234,9 +256,19 @@ export function createApp(db) {
       return [200, orderDto(one('select * from orders where id = ?', o.id))];
     }],
 
+    // Deleting the default order promotes the most recently updated remaining order.
     ['DELETE', '/api/orders/:id', ({ user, params }) => {
-      ownOrder(user.id, params.id);
-      run('delete from orders where id = ?', params.id);
+      const o = ownOrder(user.id, params.id);
+      withTransaction(() => {
+        run('delete from orders where id = ?', o.id);
+        if (o.is_default === 1) {
+          run(
+            `update orders set is_default = 1 where id =
+               (select id from orders where restaurant_id = ? order by updated_at desc, created_at desc limit 1)`,
+            o.restaurant_id,
+          );
+        }
+      });
       return [204];
     }],
 

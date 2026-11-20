@@ -34,12 +34,33 @@
         <ion-item
           v-for="restaurant in restaurants"
           :key="restaurant.id"
+          button
+          detail
           data-testid="restaurant-item"
+          @click="openRestaurant(restaurant.id)"
         >
           <ion-label class="ion-text-wrap">
             <h2 data-testid="restaurant-name">
               {{ restaurant.name }}
             </h2>
+            <p
+              v-if="restaurant.defaultItems.length > 0"
+              data-testid="key-items"
+            >
+              {{ restaurant.defaultItems.join(', ') }}
+            </p>
+            <p
+              v-else-if="restaurant.orderCount > 0"
+              data-testid="preview-fallback"
+            >
+              No default order set
+            </p>
+            <p
+              v-else
+              data-testid="preview-fallback"
+            >
+              No orders yet. Tap to add one.
+            </p>
           </ion-label>
           <ion-badge
             slot="end"
@@ -50,6 +71,19 @@
           </ion-badge>
         </ion-item>
       </ion-list>
+      <ion-fab
+        slot="fixed"
+        vertical="bottom"
+        horizontal="end"
+      >
+        <ion-fab-button
+          aria-label="Add order"
+          data-testid="add-order"
+          @click="addOrder"
+        >
+          <ion-icon :icon="add" />
+        </ion-fab-button>
+      </ion-fab>
     </ion-content>
   </ion-page>
 </template>
@@ -68,13 +102,27 @@ import {
   IonBadge,
   IonSpinner,
   IonText,
+  IonFab,
+  IonFabButton,
+  IonIcon,
   onIonViewWillEnter,
 } from '@ionic/vue';
+import { add } from 'ionicons/icons';
+import { useRouter } from 'vue-router';
 import { fetchMyRestaurants, type RestaurantSummary } from '@/services/restaurants';
 
 const restaurants = ref<RestaurantSummary[]>([]);
 const loading = ref(true);
 const errorMessage = ref('');
+const router = useRouter();
+
+function openRestaurant(id: string) {
+  router.push(`/tabs/restaurants/${id}`);
+}
+
+function addOrder() {
+  router.push('/tabs/restaurants/new-order');
+}
 
 async function load() {
   errorMessage.value = '';

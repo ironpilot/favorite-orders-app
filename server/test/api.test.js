@@ -32,6 +32,12 @@ async function signUp(email) {
   return data;
 }
 
+async function saveOrder(token, restaurantName, body = {}) {
+  const res = await call('POST', '/api/orders', { token, body: { restaurantName, items: ['Item'], ...body } });
+  assert.equal(res.status, 201);
+  return res.data;
+}
+
 describe('auth', () => {
   it('signs up, signs in, and signs out', async () => {
     const { token, user } = await signUp('auth@example.com');
@@ -58,14 +64,14 @@ describe('restaurants and orders', () => {
   it('lists own restaurants with counts and default items, most recently updated first', async () => {
     const { token } = await signUp('owner@example.com');
     const { token: other } = await signUp('other@example.com');
-    const taco = (await call('POST', '/api/restaurants', { token, body: { name: 'Taco Spot' } })).data;
-    await call('POST', '/api/restaurants', { token, body: { name: 'Pho House' } });
-    await call('POST', `/api/restaurants/${taco.id}/orders`, { token, body: { items: ['Al pastor'], isDefault: true } });
+    await saveOrder(token, 'Pho House');
+    const first = await saveOrder(token, 'Taco Spot', { items: ['Al pastor'] });
+    const taco = { id: first.restaurantId };
     const second = await call('POST', `/api/restaurants/${taco.id}/orders`, { token, body: { items: ['Carnitas'], isDefault: true } });
     assert.equal(second.data.isDefault, true);
 
     const list = (await call('GET', '/api/restaurants', { token })).data;
-    assert.deepEqual(list.map((r) => [r.name, r.orderCount]), [['Taco Spot', 2], ['Pho House', 0]]);
+    assert.deepEqual(list.map((r) => [r.name, r.orderCount]), [['Taco Spot', 2], ['Pho House', 1]]);
     assert.deepEqual(list[0].defaultItems, ['Carnitas']);
     assert.deepEqual((await call('GET', '/api/restaurants', { token: other })).data, []);
     assert.equal((await call('GET', `/api/restaurants/${taco.id}/orders`, { token: other })).status, 404);
@@ -73,8 +79,8 @@ describe('restaurants and orders', () => {
 
   it('keeps empty restaurants and requires confirmation to remove one with orders', async () => {
     const { token } = await signUp('remove@example.com');
-    const r = (await call('POST', '/api/restaurants', { token, body: { name: 'Diner' } })).data;
-    const o = (await call('POST', `/api/restaurants/${r.id}/orders`, { token, body: { items: ['Pancakes'] } })).data;
+    const o = await saveOrder(token, 'Diner', { items: ['Pancakes'] });
+    const r = { id: o.restaurantId };
 
     assert.equal((await call('DELETE', `/api/restaurants/${r.id}`, { token })).status, 409);
     assert.equal((await call('DELETE', `/api/orders/${o.id}`, { token })).status, 204);
@@ -83,12 +89,58 @@ describe('restaurants and orders', () => {
   });
 });
 
+describe('default orders', () => {
+  it('makes a lone order the default and promotes another when the default is deleted', async () => {
+    const { token } = await signUp('default@example.com');
+    const first = await saveOrder(token, 'Bagels', { items: ['Everything'] });
+    assert.equal(first.isDefault, true);
+    const second = await saveOrder(token, 'Bagels', { items: ['Sesame'] });
+    assert.equal(second.isDefault, false);
+
+    assert.equal((await call('DELETE', `/api/orders/${first.id}`, { token })).status, 204);
+    const orders = (await call('GET', `/api/restaurants/${first.restaurantId}/orders`, { token })).data;
+    assert.deepEqual(orders.map((o) => [o.id, o.isDefault]), [[second.id, true]]);
+    assert.deepEqual((await call('GET', '/api/restaurants', { token })).data[0].defaultItems, ['Sesame']);
+  });
+
+  it('returns empty default items when no order is marked default', async () => {
+    const { token } = await signUp('nodefault@example.com');
+    const o = await saveOrder(token, 'Deli');
+    await call('PATCH', `/api/orders/${o.id}`, { token, body: { isDefault: false } });
+    const [r] = (await call('GET', '/api/restaurants', { token })).data;
+    assert.equal(r.orderCount, 1);
+    assert.deepEqual(r.defaultItems, []);
+  });
+});
+
+describe('saving orders by restaurant name', () => {
+  it('creates a restaurant for a new name and reuses an existing one', async () => {
+    const { token } = await signUp('names@example.com');
+    const a = await saveOrder(token, 'Burger Barn');
+    const b = await saveOrder(token, 'Burger Barn');
+    const c = await saveOrder(token, 'Burger Barn ');
+    const d = await saveOrder(token, 'Burgr Barn');
+    assert.equal(a.restaurantId, b.restaurantId);
+    assert.equal(a.restaurantId, c.restaurantId);
+    assert.notEqual(a.restaurantId, d.restaurantId);
+    const list = (await call('GET', '/api/restaurants', { token })).data;
+    assert.deepEqual(list.map((r) => r.name).sort(), ['Burger Barn', 'Burgr Barn']);
+    assert.equal((await call('GET', `/api/restaurants/${a.restaurantId}`, { token })).data.name, 'Burger Barn');
+  });
+
+  it('has no way to add a restaurant without an order', async () => {
+    const { token } = await signUp('noadd@example.com');
+    assert.equal((await call('POST', '/api/restaurants', { token, body: { name: 'X' } })).status, 404);
+    assert.equal((await call('POST', '/api/orders', { token, body: { items: [] } })).status, 400);
+    assert.deepEqual((await call('GET', '/api/restaurants', { token })).data, []);
+  });
+});
+
 describe('friends and sharing', () => {
   it('only allows sharing with accepted friends', async () => {
     const a = await signUp('alice@example.com');
     const b = await signUp('bob@example.com');
-    const r = (await call('POST', '/api/restaurants', { token: a.token, body: { name: 'Cafe' } })).data;
-    const o = (await call('POST', `/api/restaurants/${r.id}/orders`, { token: a.token, body: { items: ['Latte'] } })).data;
+    const o = await saveOrder(a.token, 'Cafe', { items: ['Latte'] });
 
     const share = () => call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } });
     assert.equal((await call('GET', `/api/orders/${o.id}`, { token: b.token })).status, 404);

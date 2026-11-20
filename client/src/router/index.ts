@@ -13,6 +13,8 @@ export const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/tabs/restaurants' },
       { path: 'restaurants', component: () => import('@/views/RestaurantListPage.vue') },
+      { path: 'restaurants/new-order', component: () => import('@/views/AddOrderPage.vue') },
+      { path: 'restaurants/:id', component: () => import('@/views/RestaurantOrdersPage.vue'), props: true },
       { path: 'shared', component: () => import('@/views/SharedOrdersPage.vue') },
       { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
     ],
