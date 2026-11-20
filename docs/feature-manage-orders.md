@@ -38,6 +38,7 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 21. **Toppings auto-fill:** When adding a customization (removal, addition or substitution) to an item, the text field offers an autocomplete of common toppings (e.g. Lettuce, Onions, Ketchup, Mayonnaise). The list is predefined and maintained by the administrator. The user can still type any free text that is not in the list.
 22. **Order list refresh on entry:** The restaurant's orders page (the order list) reloads its contents every time the user enters or returns to it (first entry, back navigation, switching tabs, returning from the add, edit or delete flows). The refresh keeps the current search text and sort choice where the page has them. If the refresh fails, the previous content stays visible and an error message is shown.
 23. **Pull to refresh:** The user can pull down on the restaurant orders page to reload it on demand, using the Ionic refresher. A failed or offline pull-to-refresh keeps the current list and shows a non-destructive message. While offline, a refresh keeps the cached orders and shows a message that a connection is needed.
+24. **Order detail refresh after edit:** After the user saves an edit to an order, they return to that order's detail view, which immediately shows the saved name, items, quantities, customizations and notes without a manual refresh. The detail view also reloads whenever it is entered again. Saving returns to the existing detail view rather than opening a second copy of it.
 
 ### Constraints and Assumptions
 - Mobile-first, built with Ionic, with acceptable layout on tablet and desktop.
@@ -74,6 +75,7 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 - A topping typed by the user is not in the common toppings list (accepted as free text).
 - A user-created restaurant has the same name as an administrator-owned restaurant (both appear in suggestions).
 - The user returns from editing or deleting an order and sees the change without a manual refresh.
+- The user saves an edit and the order detail view shows the updated order right away.
 - A refresh of the orders page fails (the previous orders stay visible and an error message is shown).
 - A refresh of the orders page happens while offline (the cached orders stay and a connection-needed message is shown).
 - A refresh happens while a search or sort is active (the search text and sort choice are kept).
@@ -93,6 +95,7 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 - No order history or versioning at this time.
 - Refresh on entry means every page activation (Ionic `ionViewWillEnter` style), not only the first mount.
 - Pull-to-refresh applies to all list pages in the app.
+- After an edit is saved, the open order detail view is updated with the saved order and reloads on re-entry.
 
 ### Open Questions
 None at this time.

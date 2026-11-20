@@ -4,8 +4,43 @@
       <ion-toolbar>
         <ion-title>Restaurants</ion-title>
       </ion-toolbar>
+      <ion-toolbar v-if="restaurants.length > 0">
+        <ion-searchbar
+          v-model="search"
+          placeholder="Search restaurants or items"
+          data-testid="search"
+        />
+      </ion-toolbar>
+      <ion-toolbar v-if="restaurants.length > 0">
+        <ion-segment
+          v-model="sort"
+          data-testid="sort"
+        >
+          <ion-segment-button value="recent">
+            <ion-label>Recent</ion-label>
+          </ion-segment-button>
+          <ion-segment-button value="name">
+            <ion-label>A–Z</ion-label>
+          </ion-segment-button>
+        </ion-segment>
+      </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
+      <ion-refresher
+        slot="fixed"
+        data-testid="refresher"
+        @ion-refresh="onRefresh"
+      >
+        <ion-refresher-content />
+      </ion-refresher>
+      <p
+        v-if="refreshMessage"
+        data-testid="refresh-message"
+      >
+        <ion-text color="warning">
+          {{ refreshMessage }}
+        </ion-text>
+      </p>
       <div
         v-if="loading"
         class="ion-text-center"
@@ -34,12 +69,19 @@
           Add your first order
         </ion-button>
       </div>
+      <p
+        v-else-if="visibleRestaurants.length === 0"
+        class="ion-text-center"
+        data-testid="no-matches"
+      >
+        No restaurants or items match "{{ search.trim() }}".
+      </p>
       <ion-list
         v-else
         data-testid="restaurant-list"
       >
         <ion-item
-          v-for="restaurant in restaurants"
+          v-for="restaurant in visibleRestaurants"
           :key="restaurant.id"
           button
           detail
@@ -107,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   IonPage,
   IonHeader,
@@ -124,15 +166,32 @@ import {
   IonFabButton,
   IonIcon,
   IonButton,
+  IonSearchbar,
+  IonSegment,
+  IonSegmentButton,
+  IonRefresher,
+  IonRefresherContent,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import { add } from 'ionicons/icons';
 import { useRouter } from 'vue-router';
-import { fetchMyRestaurants, type RestaurantSummary } from '@/services/restaurants';
+import {
+  fetchMyRestaurants,
+  filterAndSortRestaurants,
+  type RestaurantSort,
+  type RestaurantSummary,
+} from '@/services/restaurants';
+
+const OFFLINE_MESSAGE = 'You are offline. A connection is needed to refresh the list.';
 
 const restaurants = ref<RestaurantSummary[]>([]);
 const loading = ref(true);
+const loaded = ref(false);
 const errorMessage = ref('');
+const refreshMessage = ref('');
+const search = ref('');
+const sort = ref<RestaurantSort>('recent');
+const visibleRestaurants = computed(() => filterAndSortRestaurants([...restaurants.value], search.value, sort.value));
 const router = useRouter();
 
 function openRestaurant(id: string) {
@@ -147,21 +206,43 @@ function addOrderAt(restaurant: RestaurantSummary) {
   router.push({ path: '/tabs/restaurants/new-order', query: { restaurantId: restaurant.id, restaurant: restaurant.name } });
 }
 
+/**
+ * Reloads the list. Search text and sort are kept. Once a list is shown, a failed or offline
+ * refresh keeps it visible and shows a message instead of replacing it.
+ */
 async function load() {
-  errorMessage.value = '';
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (loaded.value) refreshMessage.value = OFFLINE_MESSAGE;
+    else errorMessage.value = OFFLINE_MESSAGE;
+    loading.value = false;
+    return;
+  }
   try {
     restaurants.value = await fetchMyRestaurants();
+    loaded.value = true;
+    errorMessage.value = '';
+    refreshMessage.value = '';
   } catch (e) {
-    errorMessage.value = e instanceof Error ? e.message : 'Could not load restaurants';
+    const message = e instanceof Error ? e.message : 'Could not load restaurants';
+    if (loaded.value) refreshMessage.value = `Could not refresh: ${message}`;
+    else errorMessage.value = message;
   } finally {
     loading.value = false;
+  }
+}
+
+async function onRefresh(event: CustomEvent) {
+  try {
+    await load();
+  } finally {
+    (event.target as HTMLIonRefresherElement | null)?.complete?.();
   }
 }
 
 onIonViewWillEnter(load);
 load();
 
-defineExpose({ load });
+defineExpose({ load, onRefresh, search, sort });
 </script>
 
 <style scoped>

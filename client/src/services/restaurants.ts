@@ -6,6 +6,8 @@ export interface RestaurantSummary {
   name: string;
   orderCount: number;
   defaultItems: string[];
+  /** Item names across all of the user's orders here, used by search. */
+  itemNames?: string[];
   /** Administrator-owned restaurants are read-only for users. */
   adminOwned?: boolean;
   updatedAt: string;
@@ -80,9 +82,24 @@ export async function fetchMyRestaurants(): Promise<RestaurantSummary[]> {
     name: row.name,
     orderCount: row.orderCount,
     defaultItems: row.defaultItems ?? [],
+    ...(row.itemNames ? { itemNames: row.itemNames } : {}),
     ...(row.adminOwned !== undefined ? { adminOwned: row.adminOwned } : {}),
     updatedAt: row.updatedAt,
   }));
+}
+
+export type RestaurantSort = 'recent' | 'name';
+
+/** Filters by restaurant or item name (case-insensitive) and sorts; names are never merged. */
+export function filterAndSortRestaurants(list: RestaurantSummary[], search: string, sort: RestaurantSort): RestaurantSummary[] {
+  const q = search.trim().toLowerCase();
+  const matches = (r: RestaurantSummary) => !q
+    || r.name.toLowerCase().includes(q)
+    || [...(r.itemNames ?? []), ...r.defaultItems].some((i) => i.toLowerCase().includes(q));
+  const filtered = list.filter(matches);
+  return sort === 'name'
+    ? filtered.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    : filtered.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
 }
 
 export function fetchRestaurant(id: string): Promise<Restaurant> {
@@ -112,9 +129,20 @@ export function fetchOrder(id: string): Promise<Order> {
   return api<Order>('GET', `/api/orders/${encodeURIComponent(id)}`);
 }
 
-/** Updates an order; the restaurant cannot be changed. */
-export function updateOrder(id: string, changes: { title?: string; items?: OrderItem[]; notes?: string }): Promise<Order> {
-  return api<Order>('PATCH', `/api/orders/${encodeURIComponent(id)}`, changes);
+type OrderListener = (order: Order) => void;
+const orderListeners = new Set<OrderListener>();
+
+/** Subscribes to saved order edits so open pages can show them; returns an unsubscribe function. */
+export function onOrderUpdated(listener: OrderListener): () => void {
+  orderListeners.add(listener);
+  return () => orderListeners.delete(listener);
+}
+
+/** Updates an order; the restaurant cannot be changed. Notifies order listeners on success. */
+export async function updateOrder(id: string, changes: { title?: string; items?: OrderItem[]; notes?: string }): Promise<Order> {
+  const saved = await api<Order>('PATCH', `/api/orders/${encodeURIComponent(id)}`, changes);
+  if (saved) orderListeners.forEach((l) => l(saved));
+  return saved;
 }
 
 export function setDefaultOrder(id: string): Promise<Order> {

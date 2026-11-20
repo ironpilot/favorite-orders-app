@@ -46,6 +46,8 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 ### Non-Functional Requirements
 - Mobile-first design: layouts and interactions are designed for phones first.
 - Built with Ionic components for a consistent, native-feeling UI.
+- Confirmation screens (e.g. removing an order or a restaurant) use the Ionic `ion-alert` component, with a Cancel button and a clearly labeled confirming action.
+- Success and failure messages (e.g. an order saved, removed or shared, or an action that failed) are shown with the Ionic `ion-alert` component.
 - Responsive, with acceptable layout on tablet and desktop.
 - Fast load times and smooth navigation.
 - Offline support: saved and shared orders are cached and viewable offline (read-only); creating, editing, deleting, and sharing require a connection.
@@ -88,6 +90,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 ## Technical Decisions
 - UI framework: Ionic (mobile-first components and navigation).
 - Frontend: Vue (Ionic Vue) with TypeScript.
+- Dialogs: `ion-alert` is the standard component for confirmations and success/failure messages.
 - Native layer: Capacitor for iOS and Android builds, plus a PWA.
 - Backend: Node.js HTTP/JSON API server (`server/`) using the built-in `node:http` and `node:sqlite` modules (Node 22.13+), with no external runtime dependencies.
 - Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants (administrator-owned with no user owner, or user-created), orders (belonging to a restaurant), order items (belonging to an order, with a quantity defaulting to 1), order item customizations (remove, add, or substitute), a common toppings list, friendships, and order shares.
@@ -103,6 +106,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 
 ## UI/UX Overview
 - Bottom tab or menu navigation suited to one-handed mobile use.
+- Confirmations and success/failure messages are presented as `ion-alert` dialogs rather than inline buttons or text.
 - List/card views of restaurants with name, order count, and default-order items; empty restaurants show a prompt to add an order.
 - Search field and sort option on the restaurant list.
 - Pull-to-refresh (Ionic refresher) on all list pages: restaurant list, restaurant orders list, Shared orders list and friends list.

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   orders: [] as unknown[],
   suggestions: [] as unknown[],
   toppings: [] as string[],
+  failRestaurants: false,
   signUp: vi.fn(),
   signIn: vi.fn(),
 }));
@@ -43,7 +44,10 @@ vi.mock('@/lib/api', () => {
         state.userId = 'new-user';
         return { token: 't', user: { id: state.userId } };
       }
-      if (path === '/api/restaurants') return state.rows;
+      if (path === '/api/restaurants') {
+        if (state.failRestaurants) throw new ApiError(500, 'Server down');
+        return state.rows;
+      }
       if (path.startsWith('/api/restaurant-suggestions')) return state.suggestions;
       if (path.startsWith('/api/toppings')) return state.toppings;
       if (method === 'POST' && path === '/api/orders') {
@@ -72,6 +76,8 @@ beforeEach(() => {
   state.orders = [];
   state.suggestions = [];
   state.toppings = [];
+  state.failRestaurants = false;
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   state.signIn.mockClear();
   state.signUp.mockClear();
 });
@@ -225,7 +231,129 @@ describe('RestaurantListPage', () => {
     expect(name.text()).toBe(long);
     expect(name.attributes('title')).toBe(long);
     expect(name.classes()).toContain('restaurant-name');
-    expect(wrapper.find('ion-label').classes()).toContain('ion-text-wrap');
+    expect(wrapper.find('[data-testid="restaurant-item"] ion-label').classes()).toContain('ion-text-wrap');
+  });
+});
+
+describe('RestaurantListPage search and sort', () => {
+  type Vm = { search: string; sort: string; load: () => Promise<void>; onRefresh: (e: unknown) => Promise<void> };
+  const rows = () => [
+    { id: 'r1', name: 'Taco Spot', updatedAt: '2026-01-02', orderCount: 1, defaultItems: ['Taco'], itemNames: ['Taco'] },
+    { id: 'r2', name: 'burger barn', updatedAt: '2026-01-03', orderCount: 1, defaultItems: [], itemNames: ['Cheeseburger'] },
+    { id: 'r3', name: 'Burger Barn', updatedAt: '2026-01-01', orderCount: 1, defaultItems: ['Fries'], itemNames: ['Fries'] },
+  ];
+  async function mountList() {
+    state.userId = 'user-1';
+    state.rows = rows();
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    const names = () => wrapper.findAll('[data-testid="restaurant-name"]').map((n) => n.text());
+    return { wrapper, vm: wrapper.vm as unknown as Vm, names };
+  }
+
+  it('defaults to most recently updated first, keeping different spellings separate', async () => {
+    const { names } = await mountList();
+    expect(names()).toEqual(['burger barn', 'Taco Spot', 'Burger Barn']);
+  });
+
+  it('sorts A-Z', async () => {
+    const { vm, names, wrapper } = await mountList();
+    vm.sort = 'name';
+    await wrapper.vm.$nextTick();
+    expect(names().map((n) => n.toLowerCase())).toEqual(['burger barn', 'burger barn', 'taco spot']);
+  });
+
+  it('filters by restaurant name and by item name, and clearing restores the list', async () => {
+    const { vm, names, wrapper } = await mountList();
+    vm.search = 'taco s';
+    await wrapper.vm.$nextTick();
+    expect(names()).toEqual(['Taco Spot']);
+    vm.search = 'BURGER';
+    await wrapper.vm.$nextTick();
+    expect(names()).toEqual(['burger barn', 'Burger Barn']);
+    vm.search = 'cheese';
+    await wrapper.vm.$nextTick();
+    expect(names()).toEqual(['burger barn']);
+    vm.search = '';
+    await wrapper.vm.$nextTick();
+    expect(names()).toHaveLength(3);
+  });
+
+  it('shows a no-matches state', async () => {
+    const { vm, wrapper } = await mountList();
+    vm.search = 'sushi';
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="no-matches"]').exists()).toBe(true);
+  });
+
+  it('moves a restaurant to the top after its order changes', async () => {
+    const { vm, names } = await mountList();
+    state.rows = rows().map((r) => (r.id === 'r3' ? { ...r, updatedAt: '2026-02-01' } : r));
+    await vm.load();
+    await flushPromises();
+    expect(names()[0]).toBe('Burger Barn');
+  });
+});
+
+describe('RestaurantListPage refresh', () => {
+  type Vm = { search: string; sort: string; load: () => Promise<void>; onRefresh: (e: unknown) => Promise<void> };
+  async function mountList() {
+    state.userId = 'user-1';
+    state.rows = [{ id: 'r1', name: 'Taco Spot', updatedAt: '2026-01-02', orderCount: 1, defaultItems: ['Taco'] }];
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    return { wrapper, vm: wrapper.vm as unknown as Vm };
+  }
+  const listCalls = () => state.calls.filter((c) => c[1] === '/api/restaurants').length;
+
+  it('reloads on entry and on every re-entry, showing changes', async () => {
+    const { wrapper, vm } = await mountList();
+    expect(listCalls()).toBe(1);
+    state.rows = [...state.rows, { id: 'r2', name: 'Pho House', updatedAt: '2026-01-05', orderCount: 1, defaultItems: [] }];
+    await vm.load(); // what ionViewWillEnter runs on back navigation or tab switch
+    await flushPromises();
+    expect(listCalls()).toBe(2);
+    expect(wrapper.findAll('[data-testid="restaurant-name"]').map((n) => n.text())).toEqual(['Pho House', 'Taco Spot']);
+  });
+
+  it('pull to refresh reloads and completes the refresher', async () => {
+    const { vm } = await mountList();
+    const complete = vi.fn();
+    await vm.onRefresh({ target: { complete } });
+    expect(listCalls()).toBe(2);
+    expect(complete).toHaveBeenCalled();
+  });
+
+  it('keeps the search text and sort choice across a refresh', async () => {
+    const { vm } = await mountList();
+    vm.search = 'taco';
+    vm.sort = 'name';
+    await vm.load();
+    expect(vm.search).toBe('taco');
+    expect(vm.sort).toBe('name');
+  });
+
+  it('keeps the previous list and shows an error when a refresh fails', async () => {
+    const { wrapper, vm } = await mountList();
+    state.failRestaurants = true;
+    const complete = vi.fn();
+    await vm.onRefresh({ target: { complete } });
+    await flushPromises();
+    expect(complete).toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="restaurant-name"]').text()).toBe('Taco Spot');
+    expect(wrapper.find('[data-testid="refresh-message"]').text()).toContain('Server down');
+  });
+
+  it('keeps the list and shows a connection-needed message when offline', async () => {
+    const { wrapper, vm } = await mountList();
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    const complete = vi.fn();
+    await vm.onRefresh({ target: { complete } });
+    await flushPromises();
+    expect(complete).toHaveBeenCalled();
+    expect(listCalls()).toBe(1);
+    expect(wrapper.find('[data-testid="restaurant-name"]').text()).toBe('Taco Spot');
+    expect(wrapper.find('[data-testid="refresh-message"]').text()).toContain('connection is needed');
   });
 });
 

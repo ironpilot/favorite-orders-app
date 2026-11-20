@@ -291,11 +291,22 @@ export function createApp(db) {
         user.id, user.id, user.id, user.id, user.id,
       );
       const defaults = loadItems(rows.map((r) => r.default_order_id).filter(Boolean));
+      // Distinct item names across all of the user's orders at each restaurant, for search.
+      const itemNames = new Map();
+      for (const { restaurant_id: rid, name } of all(
+        `select distinct o.restaurant_id, i.name from order_items i join orders o on o.id = i.order_id
+          where o.owner_id = ?`,
+        user.id,
+      )) {
+        if (!itemNames.has(rid)) itemNames.set(rid, []);
+        itemNames.get(rid).push(name);
+      }
       return [200, rows.map((r) => ({
         id: r.id,
         name: r.name,
         orderCount: r.order_count,
         defaultItems: r.default_order_id ? defaults.get(r.default_order_id).map((i) => i.name) : [],
+        itemNames: itemNames.get(r.id) ?? [],
         adminOwned: r.owner_id === null,
         updatedAt: r.updated_at,
       }))];

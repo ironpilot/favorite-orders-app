@@ -210,4 +210,19 @@ defineExpose({ orders, load, onRefresh, makeDefault });
   color: var(--ion-color-medium);
   margin: 4px 16px;
 }
+
+/* Larger text on mobile (phone-width) screens only. */
+@media (max-width: 767px) {
+  ion-label h2 {
+    font-size: 1.3rem;
+  }
+
+  ion-label p {
+    font-size: 1.05rem;
+  }
+
+  .hint {
+    font-size: 1rem;
+  }
+}
 </style>

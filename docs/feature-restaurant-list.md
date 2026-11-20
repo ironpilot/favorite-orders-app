@@ -86,11 +86,11 @@ Each step has a **Status** line: `Complete`, `Partial` (with what is done and wh
 | 2. Default order and key-items preview | Complete |
 | 3. Select restaurant and add-order entry point | Complete |
 | 4. Empty states | Complete |
-| 5. Search and sort | Not started |
+| 5. Search and sort | Complete |
 | 6. Remove a restaurant | Partial |
 | 7. Offline support | Not started |
 | 8. Polish and cross-platform check | Not started |
-| 9. Refresh on entry and pull to refresh | Not started |
+| 9. Refresh on entry and pull to refresh | Complete |
 
 ### Step 1: Restaurant data and list screen skeleton
 - **Status:** Complete. Server restaurant/order data, list page, bottom tabs, landing redirect and per-user filtering are implemented with unit and API tests.
@@ -156,7 +156,7 @@ Refresh on entry and pull to refresh (FR18, FR19) are added in Step 9.
 - A very long restaurant name is truncated or wrapped without breaking the layout.
 
 ### Step 5: Search and sort
-- **Status:** Not started. The list page has no search field or sort option.
+- **Status:** Complete. The list has a searchbar matching restaurant names and item names across all the user's orders (the server returns `itemNames`), a no-matches state, and a Recent / A–Z sort. Unit tests cover it.
 - **Outcome:** The user can find restaurants by name or item and order the list.
 - **Covers:** FR12, FR13, FR16
 - **Decision:** Search matches restaurant names and item names. "Most recently updated" counts new orders, order edits and default changes.
@@ -213,7 +213,7 @@ Refresh on entry and pull to refresh (FR18, FR19) are added in Step 9.
 - Each edge case in the Edge Cases section is checked.
 
 ### Step 9: Refresh on entry and pull to refresh
-- **Status:** Not started. The list loads its data once when the page is created and has no refresher.
+- **Status:** Complete. The list reloads on every `ionViewWillEnter` and through an Ionic refresher, keeping search and sort. A failed or offline refresh keeps the list visible and shows a message. Unit tests cover it. Cache-backed offline loading is still part of Step 7.
 - **Outcome:** The list reloads every time the user enters or returns to it, and the user can pull down to reload on demand.
 - **Covers:** FR18, FR19, FR10 (refresh while offline)
 - **Decision:** Refresh runs on every page activation, not only first mount, and uses the Ionic refresher for pull-to-refresh. A refresh keeps the search text and sort choice, and never clears the visible list on failure or while offline.

@@ -69,7 +69,7 @@ import RestaurantOrdersPage from '@/views/RestaurantOrdersPage.vue';
 import OrderDetailPage from '@/views/OrderDetailPage.vue';
 import AddOrderPage from '@/views/AddOrderPage.vue';
 import { buildRouter } from '@/router';
-import { shareHandler } from '@/services/restaurants';
+import { shareHandler, updateOrder } from '@/services/restaurants';
 
 function order(id: string, extra: Partial<TestOrder> = {}): TestOrder {
   return {
@@ -215,6 +215,26 @@ describe('OrderDetailPage', () => {
     expect(wrapper.find('[data-testid="detail-default-badge"]').exists()).toBe(true);
   });
 
+  it('shows a saved edit right away, without a manual refresh', async () => {
+    state.orders = [order('o1', { title: 'Old name' })];
+    const { wrapper } = await mountDetail();
+    const gets = () => state.calls.filter(([m, p]) => m === 'GET' && p === '/api/orders/o1').length;
+    const before = gets();
+    await updateOrder('o1', { title: 'New name', items: [{ name: 'Burrito', quantity: 3, customizations: [] }] });
+    await flushPromises();
+    expect(gets()).toBe(before);
+    expect(wrapper.find('[data-testid="detail-name"]').text()).toBe('New name');
+    expect(wrapper.find('[data-testid="detail-item"]').text()).toContain('Burrito');
+  });
+
+  it('ignores saved edits to other orders', async () => {
+    state.orders = [order('o1', { title: 'Mine' }), order('o2', { title: 'Other' })];
+    const { wrapper } = await mountDetail('o1');
+    await updateOrder('o2', { title: 'Changed' });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="detail-name"]').text()).toBe('Mine');
+  });
+
   it('identifies an unnamed order by its items', async () => {
     state.orders = [order('o1', { items: [{ name: 'Pho', quantity: 1, customizations: [] }] })];
     const { wrapper } = await mountDetail();
@@ -249,7 +269,8 @@ describe('OrderDetailPage', () => {
     const { wrapper, router } = await mountDetail('o1');
     await wrapper.find('[data-testid="delete-order"]').trigger('click');
     expect(state.calls.some(([m]) => m === 'DELETE')).toBe(false);
-    await wrapper.find('[data-testid="confirm-delete"]').trigger('click');
+    expect((wrapper.vm as any).confirmingDelete).toBe(true);
+    (wrapper.vm as any).deleteAlertButtons.find((b: any) => b.role === 'destructive').handler();
     await flushPromises();
     expect(state.calls).toContainEqual(['DELETE', '/api/orders/o1', undefined]);
     expect(state.orders.find((o) => o.isDefault)?.id).toBe('o2');
@@ -260,7 +281,8 @@ describe('OrderDetailPage', () => {
     state.orders = [order('o1', { isDefault: true })];
     const { wrapper, router } = await mountDetail('o1');
     await wrapper.find('[data-testid="delete-order"]').trigger('click');
-    await wrapper.find('[data-testid="confirm-delete"]').trigger('click');
+    expect((wrapper.vm as any).confirmingDelete).toBe(true);
+    (wrapper.vm as any).deleteAlertButtons.find((b: any) => b.role === 'destructive').handler();
     await flushPromises();
     expect(router.currentRoute.value.path).toBe('/tabs/restaurants/r1');
     expect(state.calls.some(([m, p]) => m === 'DELETE' && p.startsWith('/api/restaurants'))).toBe(false);

@@ -472,7 +472,10 @@ async function submit() {
   if (editingId) {
     try {
       await updateOrder(editingId, { title: title.value.trim(), items: built, notes: notes.value.trim() });
-      await router.replace(`/tabs/restaurants/${editingRestaurantId}/orders/${editingId}`);
+      // Return to the existing detail page (it re-enters and shows the edit) instead of stacking a new one.
+      const detailPath = `/tabs/restaurants/${editingRestaurantId}/orders/${editingId}`;
+      if (typeof window !== 'undefined' && window.history.state?.back === detailPath) router.back();
+      else await router.replace(detailPath);
     } catch (e) {
       errorMessage.value = e instanceof Error ? e.message : 'Could not save order';
     } finally {

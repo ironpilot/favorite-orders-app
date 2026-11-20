@@ -70,6 +70,7 @@
           {{ order.notes }}
         </p>
         <ion-button
+            size="small"
           expand="block"
           data-testid="share-order"
           @click="share"
@@ -81,6 +82,7 @@
           Share
         </ion-button>
         <ion-button
+          size="small"
           expand="block"
           fill="outline"
           data-testid="edit-order"
@@ -99,43 +101,34 @@
           Make default
         </ion-button>
         <ion-button
-          v-if="!confirmingDelete"
+          size="small"
           expand="block"
           fill="clear"
           color="danger"
           data-testid="delete-order"
           @click="confirmingDelete = true"
         >
+          <ion-icon
+              slot="start"
+              :icon="trashOutline"
+          />
           Remove order
         </ion-button>
-        <div
-          v-else
+        <ion-alert
+          :is-open="confirmingDelete"
+          header="Remove order"
+          message="Remove this order?"
+          :buttons="deleteAlertButtons"
           data-testid="delete-confirm"
-        >
-          <p>Remove this order?</p>
-          <ion-button
-            color="danger"
-            :disabled="busy"
-            data-testid="confirm-delete"
-            @click="remove"
-          >
-            Remove
-          </ion-button>
-          <ion-button
-            fill="clear"
-            data-testid="cancel-delete"
-            @click="confirmingDelete = false"
-          >
-            Cancel
-          </ion-button>
-        </div>
+          @did-dismiss="confirmingDelete = false"
+        />
       </div>
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onUnmounted, ref } from 'vue';
 import {
   IonPage,
   IonHeader,
@@ -152,14 +145,16 @@ import {
   IonText,
   IonButton,
   IonIcon,
+  IonAlert,
   onIonViewWillEnter,
 } from '@ionic/vue';
-import { shareOutline } from 'ionicons/icons';
+import {shareOutline, trashOutline} from 'ionicons/icons';
 import { useRoute, useRouter } from 'vue-router';
 import {
   deleteOrder,
   fetchOrder,
   formatCustomization,
+  onOrderUpdated,
   orderLabel,
   setDefaultOrder,
   shareHandler,
@@ -177,6 +172,10 @@ const loading = ref(true);
 const busy = ref(false);
 const errorMessage = ref('');
 const confirmingDelete = ref(false);
+const deleteAlertButtons = [
+  { text: 'Cancel', role: 'cancel' },
+  { text: 'Remove', role: 'destructive', handler: () => { remove(); } },
+];
 
 async function load() {
   errorMessage.value = '';
@@ -223,10 +222,16 @@ async function remove() {
   }
 }
 
+// Show a saved edit right away, then reload from the server when the page is entered again.
+const stopListening = onOrderUpdated((saved) => {
+  if (saved.id === orderId) order.value = saved;
+});
+onUnmounted(stopListening);
+
 onIonViewWillEnter(load);
 load();
 
-defineExpose({ order, load, makeDefault, remove, share });
+defineExpose({ order, load, makeDefault, remove, share, confirmingDelete, deleteAlertButtons });
 </script>
 
 <style scoped>
@@ -234,9 +239,27 @@ defineExpose({ order, load, makeDefault, remove, share });
   max-width: 640px;
   margin: 0 auto;
   overflow-wrap: anywhere;
+  /* Larger text for readability on web and mobile. */
+  font-size: 1.15rem;
 }
 
 .notes {
   white-space: pre-wrap;
+}
+
+.order-detail :deep(h2) {
+  font-size: 1.4rem;
+}
+
+.order-detail :deep(ion-label),
+.order-detail :deep(p) {
+  font-size: 1.1rem;
+}
+
+/* Larger item names (with quantity) on mobile (phone-width) screens only. */
+@media (max-width: 767px) {
+  .order-detail :deep(ion-label h3) {
+    font-size: 1.35rem;
+  }
 }
 </style>
