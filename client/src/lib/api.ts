@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'favorite-order.token';
+const REFRESH_KEY = 'favorite-order.refresh-token';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -13,6 +14,15 @@ export function getToken(): string | null {
 export function setToken(token: string | null): void {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+export function setRefreshToken(token: string | null): void {
+  if (token) localStorage.setItem(REFRESH_KEY, token);
+  else localStorage.removeItem(REFRESH_KEY);
 }
 
 /** Calls the Node API, attaching the session token when signed in. */

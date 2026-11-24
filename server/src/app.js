@@ -29,6 +29,7 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export const VERIFICATION_TTL_MS = 15 * 60 * 1000;
 export const RESET_TTL_MS = 30 * 60 * 1000;
+export const REFRESH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 export const RESEND_PER_MINUTE = 1;
 export const RESEND_PER_HOUR = 5;
 export const RESET_REQUESTED_MESSAGE = 'If an account exists for this email, a reset link has been sent';
@@ -223,14 +224,53 @@ export function createApp(db, options = {}) {
     );
   }
 
+  function latestEmailChange(userId) {
+    return one(
+      'select * from email_changes where user_id = ? and invalidated = 0 order by created_at desc limit 1',
+      userId,
+    );
+  }
+
   function accountDto(u) {
     const pending = u.email_verified_at ? null : latestVerification(u.id);
+    const change = latestEmailChange(u.id);
     return {
       ...publicUser(u),
       emailVerified: !!u.email_verified_at,
       verificationExpiresAt: pending ? new Date(pending.expires_at).toISOString() : null,
+      pendingEmail: change ? change.new_email : null,
+      pendingEmailExpiresAt: change ? new Date(change.expires_at).toISOString() : null,
     };
   }
+
+  // Sends a 6-digit code to the new address; the old email stays active until it is confirmed.
+  function sendEmailChange(user, newEmail) {
+    const t = clock();
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const expiresAt = t + VERIFICATION_TTL_MS;
+    run('update email_changes set invalidated = 1 where user_id = ?', user.id);
+    run(
+      'insert into email_changes (id, user_id, new_email, code_hash, expires_at, created_at) values (?, ?, ?, ?, ?, ?)',
+      randomUUID(), user.id, newEmail, sha256(code), expiresAt, t,
+    );
+    mailer.send({
+      to: newEmail,
+      subject: 'Confirm your new email',
+      text: `Your Favorite Order email change code is ${code}. It expires at ${new Date(expiresAt).toISOString()} (15 minutes).`,
+      code,
+    });
+  }
+
+  function checkResendLimits(table, userId) {
+    const t = clock();
+    const count = (since) => one(
+      `select count(*) as n from ${table} where user_id = ? and created_at > ?`, userId, since,
+    ).n;
+    if (count(t - 60_000) >= RESEND_PER_MINUTE) throw new HttpError(429, 'Please wait a minute before requesting another code');
+    if (count(t - 3_600_000) >= RESEND_PER_HOUR) throw new HttpError(429, 'Too many codes requested; try again later');
+  }
+
+  const emailTaken = (email, userId) => !!one('select 1 from users where email = ? and id <> ?', email, userId);
 
   // Sends a fresh 6-digit code valid for 15 minutes; it invalidates any earlier code.
   function sendVerification(user) {
@@ -253,7 +293,11 @@ export function createApp(db, options = {}) {
   function issueSession(user) {
     const token = randomBytes(32).toString('hex');
     run('insert into sessions (token, user_id) values (?, ?)', token, user.id);
-    return { token, user: accountDto(user) };
+    const refreshToken = randomBytes(32).toString('hex');
+    const refreshExpiresAt = clock() + REFRESH_TTL_MS;
+    run('insert into refresh_tokens (token_hash, user_id, session_token, expires_at) values (?, ?, ?, ?)',
+      sha256(refreshToken), user.id, token, refreshExpiresAt);
+    return { token, refreshToken, refreshExpiresAt: new Date(refreshExpiresAt).toISOString(), user: accountDto(user) };
   }
 
   function withTransaction(fn) {
@@ -325,13 +369,80 @@ export function createApp(db, options = {}) {
       return [200, issueSession(user)];
     }, false],
 
-    // Signing out revokes the session token on the server; the client also clears it locally.
-    ['POST', '/api/auth/signout', ({ token }) => {
+    // Signing out revokes the session token and its refresh token; the client also clears them locally.
+    ['POST', '/api/auth/signout', ({ token, body }) => {
+      run('update refresh_tokens set revoked = 1 where session_token = ? or token_hash = ?',
+        token, sha256(String(body.refreshToken ?? '')));
       run('delete from sessions where token = ?', token);
       return [204];
     }, 'unverified'],
 
     ['GET', '/api/auth/me', ({ user }) => [200, accountDto(user)], 'unverified'],
+
+    // Edit profile. Email and phone stay unique (one generic error). A new email must be confirmed
+    // with a code before it replaces the old one. Changing the password needs the current one and
+    // signs out the account's other sessions.
+    ['PATCH', '/api/auth/me', ({ user, token, body }) => {
+      const displayName = body.displayName !== undefined ? requireText(body.displayName, 'Name', 100) : user.display_name;
+      const phone = body.phone !== undefined ? normalizePhone(body.phone) : user.phone;
+      let newEmail = null;
+      if (body.email !== undefined) {
+        const email = requireText(body.email, 'Email', 254);
+        if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address');
+        if (email.toLowerCase() !== user.email.toLowerCase()) newEmail = email;
+      }
+      if (body.password !== undefined) {
+        if (typeof body.currentPassword !== 'string' || !verifyPassword(body.currentPassword, user.password_hash)) {
+          throw new HttpError(400, 'Current password is incorrect');
+        }
+        validatePassword(body.password);
+      }
+      if ((newEmail && emailTaken(newEmail, user.id))
+        || (phone && one('select 1 from users where phone = ? and id <> ?', phone, user.id))) {
+        throw new HttpError(409, DUPLICATE_ACCOUNT_MESSAGE);
+      }
+      withTransaction(() => {
+        try {
+          run('update users set display_name = ?, phone = ?, updated_at = ? where id = ?', displayName, phone, now(), user.id);
+        } catch (e) {
+          if (/UNIQUE/i.test(String(e?.message))) throw new HttpError(409, DUPLICATE_ACCOUNT_MESSAGE);
+          throw e;
+        }
+        if (body.password !== undefined) {
+          run('update users set password_hash = ? where id = ?', hashPassword(body.password), user.id);
+          run('update refresh_tokens set revoked = 1 where user_id = ? and session_token <> ?', user.id, token);
+          run('delete from sessions where user_id = ? and token <> ?', user.id, token);
+        }
+      });
+      const updated = one('select * from users where id = ?', user.id);
+      if (newEmail) sendEmailChange(updated, newEmail);
+      return [200, accountDto(updated)];
+    }],
+
+    ['POST', '/api/auth/email-change/verify', ({ user, body }) => {
+      const code = String(body.code ?? '').trim();
+      const c = latestEmailChange(user.id);
+      if (!code || !c || c.code_hash !== sha256(code)) throw new HttpError(400, 'Invalid verification code');
+      if (c.expires_at <= clock()) throw new HttpError(400, 'Verification code has expired; request a new one');
+      if (emailTaken(c.new_email, user.id)) throw new HttpError(409, DUPLICATE_ACCOUNT_MESSAGE);
+      run('update users set email = ?, updated_at = ? where id = ?', c.new_email, now(), user.id);
+      run('update email_changes set invalidated = 1 where user_id = ?', user.id);
+      return [200, accountDto(one('select * from users where id = ?', user.id))];
+    }],
+
+    // Same limits as sign-up verification: 1 per minute, 5 per hour.
+    ['POST', '/api/auth/email-change/resend', ({ user }) => {
+      const c = latestEmailChange(user.id);
+      if (!c) throw new HttpError(400, 'No email change is pending');
+      checkResendLimits('email_changes', user.id);
+      sendEmailChange(user, c.new_email);
+      return [200, accountDto(user)];
+    }],
+
+    ['DELETE', '/api/auth/email-change', ({ user }) => {
+      run('update email_changes set invalidated = 1 where user_id = ?', user.id);
+      return [200, accountDto(user)];
+    }],
 
     ['POST', '/api/auth/verify', ({ user, body }) => {
       if (user.email_verified_at) return [200, accountDto(user)];
@@ -347,12 +458,7 @@ export function createApp(db, options = {}) {
     // Resending is limited to 1 per minute and 5 per hour.
     ['POST', '/api/auth/resend-verification', ({ user }) => {
       if (user.email_verified_at) throw new HttpError(400, 'Email is already verified');
-      const t = clock();
-      const count = (since) => one(
-        'select count(*) as n from email_verifications where user_id = ? and created_at > ?', user.id, since,
-      ).n;
-      if (count(t - 60_000) >= RESEND_PER_MINUTE) throw new HttpError(429, 'Please wait a minute before requesting another code');
-      if (count(t - 3_600_000) >= RESEND_PER_HOUR) throw new HttpError(429, 'Too many codes requested; try again later');
+      checkResendLimits('email_verifications', user.id);
       sendVerification(user);
       return [200, accountDto(user)];
     }, 'unverified'],
@@ -387,6 +493,7 @@ export function createApp(db, options = {}) {
         run('update users set password_hash = ?, updated_at = ? where id = ?', hashPassword(body.password), now(), r.user_id);
         run('update password_resets set used = 1 where user_id = ?', r.user_id);
         run('delete from sessions where user_id = ?', r.user_id);
+        run('update refresh_tokens set revoked = 1 where user_id = ?', r.user_id);
       });
       return [204];
     }, false],

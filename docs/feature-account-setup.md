@@ -103,8 +103,8 @@ Each step is a usable increment that builds on the previous one. Each step has a
 |------|--------|
 | 1. Sign-up and sign-in basics | Complete |
 | 2. Email verification | Complete |
-| 3. Sign out and forgot password | Partial |
-| 4. Edit profile | Not started |
+| 3. Sign out and forgot password | Complete |
+| 4. Edit profile | Complete |
 | 5. Delete account | Not started |
 | 6. Share link sign-up and signed-in access | Not started |
 | 7. Offline behavior | Not started |
@@ -153,7 +153,7 @@ Each step is a usable increment that builds on the previous one. Each step has a
 - Sign out clears the session and revokes the refresh token on the server (when online; offline sign-out clears local tokens only).
 - Forgot password emails a time-limited reset link to the verified email; the link sets a new password.
 
-**Status:** Partial. Done: sign-out on the Profile screen revokes the server session and clears the local token (offline it clears the token only); forgot password always gives the same neutral answer and emails a single-use reset link (token stored hashed, valid 30 minutes, a new link invalidates the old one) to verified accounts only; resetting signs the account out everywhere. Remains: refresh-token revocation on sign-out waits for Step 8, which adds refresh tokens (for now the single session token is revoked).
+**Status:** Complete. Sign-out on the Profile screen revokes the server session and its refresh token and clears both local tokens (offline it clears the local tokens only); sign-in and sign-up now also issue an opaque 14-day refresh token, stored hashed in `refresh_tokens`; forgot password always gives the same neutral answer and emails a single-use reset link (token stored hashed, valid 30 minutes, a new link invalidates the old one) to verified accounts only; resetting signs the account out everywhere and revokes all refresh tokens. Refresh-token rotation, reuse detection and `POST /auth/refresh` remain part of Step 8.
 
 **Tests:**
 - Sign-out returns to sign-in and protected routes are blocked.
@@ -169,7 +169,7 @@ Each step is a usable increment that builds on the previous one. Each step has a
 - Changing the email requires re-verification; the old email stays active until then.
 - Friend links stay attached; email and phone remain the identifiers friends search by.
 
-**Status:** Not started.
+**Status:** Complete. `PATCH /api/auth/me` updates name and phone (normalized) and changes the password when the current one is given (other sessions and their refresh tokens are revoked); duplicate email or phone gets the same generic error. A new email gets a 6-digit code (valid 15 minutes, resend limited to 1 per minute and 5 per hour, cancellable) through `/api/auth/email-change/verify`, `/resend` and `DELETE /api/auth/email-change`; the old email stays active for sign-in until the new one is confirmed. The Profile screen shows the edit form and the pending email change. Friendships reference the account id, so they stay attached, and friend search uses the current email and phone.
 
 **Tests:**
 - Each field can be updated.

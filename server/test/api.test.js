@@ -210,6 +210,101 @@ describe('sign out and forgot password', () => {
   });
 });
 
+describe('refresh tokens', () => {
+  const refreshRow = (t) => db.prepare('select * from refresh_tokens where session_token = ?').get(t);
+
+  it('issues a 14-day refresh token stored hashed and revokes it on sign-out', async () => {
+    const { token, refreshToken, refreshExpiresAt } = await signUp('refresh@example.com');
+    assert.ok(refreshToken);
+    const days = (Date.parse(refreshExpiresAt) - Date.now()) / 86_400_000;
+    assert.ok(days > 13.9 && days <= 14);
+    const row = refreshRow(token);
+    assert.notEqual(row.token_hash, refreshToken);
+    assert.equal(row.revoked, 0);
+    assert.equal((await call('POST', '/api/auth/signout', { token, body: { refreshToken } })).status, 204);
+    assert.equal(refreshRow(token).revoked, 1);
+  });
+
+  it('revokes all refresh tokens on password reset', async () => {
+    const { token } = await signUp('refreshreset@example.com');
+    await call('POST', '/api/auth/forgot-password', { body: { email: 'refreshreset@example.com' } });
+    const reset = lastMail('refreshreset@example.com').token;
+    await call('POST', '/api/auth/reset-password', { body: { token: reset, password: 'newpass456' } });
+    assert.equal(refreshRow(token).revoked, 1);
+  });
+});
+
+describe('edit profile', () => {
+  it('updates name and phone, rejecting duplicates with the generic error', async () => {
+    const { token } = await signUp('edit@example.com');
+    await signUp('edit-other@example.com', '+15557770001');
+    const res = await call('PATCH', '/api/auth/me', { token, body: { displayName: 'New Name', phone: '+1 555 777 0002' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.displayName, 'New Name');
+    assert.equal(res.data.phone, '+15557770002');
+    const dupPhone = await call('PATCH', '/api/auth/me', { token, body: { phone: '+15557770001' } });
+    const dupEmail = await call('PATCH', '/api/auth/me', { token, body: { email: 'EDIT-OTHER@example.com' } });
+    assert.equal(dupPhone.status, 409);
+    assert.deepEqual(dupPhone.data, dupEmail.data);
+    assert.equal((await call('PATCH', '/api/auth/me', { token, body: { displayName: ' ' } })).status, 400);
+  });
+
+  it('keeps the old email active until the new one is verified', async () => {
+    const { token } = await signUp('oldmail@example.com');
+    const res = await call('PATCH', '/api/auth/me', { token, body: { email: 'newmail@example.com' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.email, 'oldmail@example.com');
+    assert.equal(res.data.pendingEmail, 'newmail@example.com');
+    const signinOld = await call('POST', '/api/auth/signin', { body: { email: 'oldmail@example.com', password: 'secret123' } });
+    assert.equal(signinOld.status, 200);
+    assert.equal((await call('GET', '/api/restaurants', { token })).status, 200);
+
+    assert.equal((await call('POST', '/api/auth/email-change/resend', { token })).status, 429);
+    assert.equal((await call('POST', '/api/auth/email-change/verify', { token, body: { code: 'bad' } })).status, 400);
+    const ok = await call('POST', '/api/auth/email-change/verify', { token, body: { code: lastMail('newmail@example.com').code } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.email, 'newmail@example.com');
+    assert.equal(ok.data.pendingEmail, null);
+    assert.equal((await call('POST', '/api/auth/signin', { body: { email: 'oldmail@example.com', password: 'secret123' } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/signin', { body: { email: 'newmail@example.com', password: 'secret123' } })).status, 200);
+  });
+
+  it('rejects an expired email change code', async () => {
+    const { token } = await signUp('expchange@example.com');
+    await call('PATCH', '/api/auth/me', { token, body: { email: 'expchange2@example.com' } });
+    clockOffset = 16 * 60_000;
+    try {
+      const res = await call('POST', '/api/auth/email-change/verify', { token, body: { code: lastMail('expchange2@example.com').code } });
+      assert.equal(res.status, 400);
+    } finally {
+      clockOffset = 0;
+    }
+  });
+
+  it('changes the password with the current one and signs out other sessions', async () => {
+    const { token } = await signUp('pwchange@example.com');
+    const other = (await call('POST', '/api/auth/signin', { body: { email: 'pwchange@example.com', password: 'secret123' } })).data.token;
+    assert.equal((await call('PATCH', '/api/auth/me', { token, body: { currentPassword: 'wrong', password: 'newpass456' } })).status, 400);
+    assert.equal((await call('PATCH', '/api/auth/me', { token, body: { currentPassword: 'secret123', password: 'weak' } })).status, 400);
+    assert.equal((await call('PATCH', '/api/auth/me', { token, body: { currentPassword: 'secret123', password: 'newpass456' } })).status, 200);
+    assert.equal((await call('GET', '/api/auth/me', { token })).status, 200);
+    assert.equal((await call('GET', '/api/auth/me', { token: other })).status, 401);
+    assert.equal((await call('POST', '/api/auth/signin', { body: { email: 'pwchange@example.com', password: 'newpass456' } })).status, 200);
+  });
+
+  it('keeps friend links after profile changes', async () => {
+    const a = await signUp('friendedit-a@example.com');
+    const b = await signUp('friendedit-b@example.com');
+    const req = await call('POST', '/api/friends', { token: a.token, body: { userId: b.user.id } });
+    await call('POST', `/api/friends/${req.data.id}/accept`, { token: b.token });
+    await call('PATCH', '/api/auth/me', { token: a.token, body: { displayName: 'Renamed', phone: '+15556660001' } });
+    const friends = (await call('GET', '/api/friends', { token: b.token })).data;
+    assert.equal(friends[0].user.displayName, 'Renamed');
+    const found = (await call('GET', '/api/users?q=%2B15556660001', { token: b.token })).data;
+    assert.equal(found[0].id, a.user.id);
+  });
+});
+
 describe('restaurants and orders', () => {
   it('lists own restaurants with counts and default items, most recently updated first', async () => {
     const { token } = await signUp('owner@example.com');

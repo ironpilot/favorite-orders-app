@@ -29,6 +29,29 @@ create table if not exists sessions (
   created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+-- Refresh tokens (stored hashed), 14 days, tied to the session they were issued with.
+-- Revoked on sign-out and password reset. Rotation and POST /auth/refresh come with access tokens.
+create table if not exists refresh_tokens (
+  token_hash text primary key,
+  user_id text not null references users (id) on delete cascade,
+  session_token text not null,
+  expires_at integer not null,
+  revoked integer not null default 0
+);
+create index if not exists refresh_tokens_user_idx on refresh_tokens (user_id);
+
+-- Pending email changes: the new address is verified with a code; the old one stays active until then.
+create table if not exists email_changes (
+  id text primary key,
+  user_id text not null references users (id) on delete cascade,
+  new_email text not null collate nocase,
+  code_hash text not null,
+  expires_at integer not null,
+  created_at integer not null,
+  invalidated integer not null default 0
+);
+create index if not exists email_changes_user_idx on email_changes (user_id);
+
 -- Email verification codes (stored hashed). A newer code invalidates older ones; rows also drive resend limits.
 create table if not exists email_verifications (
   id text primary key,
