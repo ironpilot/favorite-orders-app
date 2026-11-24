@@ -255,7 +255,7 @@ Tracks progress of each implementation step. Update this section whenever a step
 |------|-------|--------|
 | 1 | Structured order data and API | Complete |
 | 2 | Add an order with items and customizations | Complete |
-| 3 | Restaurant ownership and auto-fill | Not started |
+| 3 | Restaurant ownership and auto-fill | Complete |
 | 4 | Toppings auto-fill | Not started |
 | 5 | View orders, order detail and default order | Complete |
 | 6 | Edit and remove an order | Complete |
@@ -266,7 +266,7 @@ Tracks progress of each implementation step. Update this section whenever a step
 ### Details
 - **Step 1: Complete.** Items (`order_items`, quantity default 1) and customizations (`order_item_customizations`: remove/add/substitute) are stored in their own tables. Old JSON items are migrated on startup, and old customization text is appended to notes. The server rejects an order with no items, a quantity below 1, invalid customizations, over-long text and a restaurant change on update. It ignores any owner id sent by the client. Covered by server tests.
 - **Step 2: Complete.** The add-order form has an item list with a quantity stepper (starts at 1) and per-item remove/add/substitute customizations, plus an optional name and notes. Saving without items is blocked with a message, inputs have length limits, and long text wraps. Covered by client tests.
-- **Step 3: Not started.** Restaurants only have a user owner today. There is no administrator-owned restaurant support, no auto-fill, and no suggestion endpoint.
+- **Step 3: Complete.** A null `owner_id` marks an administrator-owned restaurant, seeded outside the app with `addAdminRestaurant` in `server/src/db.js`. Users cannot rename or remove these restaurants (403). `GET /api/restaurant-suggestions` returns administrator-owned restaurants and the user's own, never another user's. In the add-order form, suggestions appear as the user types. Picking one sends `restaurantId`, and a typed name without a pick creates a new user-created restaurant (different spellings stay separate). There is no "Add a restaurant" button. Covered by server and client tests.
 - **Step 4: Not started.** There is no toppings list, endpoint or autocomplete.
 - **Step 5: Complete.** The restaurant orders page lists orders (unnamed orders are identified by their items), opens an order detail view, and has a "Make default" action plus a hint when no default is marked. The detail view (`OrderDetailPage.vue`) shows name, items, quantities, customizations and notes, and has a share action that calls the `shareHandler` hook for the Share an Order feature. The orders page reloads on every entry (`ionViewWillEnter`) and has pull-to-refresh; a failed refresh keeps the previous orders and shows an error, and the refresher always ends. Covered by server and client tests.
 - **Step 6: Complete.** The detail view has Edit and Remove (with confirmation) actions. Editing reuses the add-order form at `/tabs/restaurants/:id/orders/:orderId/edit` with the restaurant field locked, saves via `PATCH` (updating the last-updated time), and blocks saving without items. Deleting the default promotes the most recently updated remaining order, and removing the last order keeps the restaurant as an empty entry. Covered by server and client tests.

@@ -236,6 +236,14 @@ describe('administrator-owned restaurants and auto-fill', () => {
     assert.equal(r.adminOwned, false);
   });
 
+  it('suggests both an administrator-owned and a same-named user-created restaurant', async () => {
+    const adminId = addAdminRestaurant(db, 'Twin Grill');
+    const { token } = await signUp('twin@example.com');
+    const own = await saveOrder(token, 'Twin Grill');
+    const res = await call('GET', '/api/restaurant-suggestions?q=twin%20grill', { token });
+    assert.deepEqual(res.data.map((r) => r.id).sort(), [adminId, own.restaurantId].sort());
+  });
+
   it('does not let users rename or remove administrator-owned restaurants', async () => {
     const adminId = addAdminRestaurant(db, 'Locked Diner');
     const { token } = await signUp('locked@example.com');

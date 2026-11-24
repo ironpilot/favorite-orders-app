@@ -2,6 +2,7 @@
 // Orders are private by default; sharing requires an accepted friendship and an explicit share record.
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { COMMON_RESTAURANTS } from './common-restaurants.js';
 
 const SCHEMA = `
 pragma foreign_keys = on;
@@ -184,10 +185,37 @@ export function addAdminRestaurant(db, name) {
   return id;
 }
 
+// One-time data migrations, recorded in schema_migrations so each runs once per database.
+const DATA_MIGRATIONS = [
+  {
+    id: '001-seed-common-restaurants',
+    run: (db) => {
+      for (const name of COMMON_RESTAURANTS) addAdminRestaurant(db, name);
+    },
+  },
+];
+
+function runDataMigrations(db) {
+  db.exec('create table if not exists schema_migrations (id text primary key, applied_at text not null default (strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\')))');
+  for (const m of DATA_MIGRATIONS) {
+    if (db.prepare('select 1 from schema_migrations where id = ?').get(m.id)) continue;
+    db.exec('begin');
+    try {
+      m.run(db);
+      db.prepare('insert into schema_migrations (id) values (?)').run(m.id);
+      db.exec('commit');
+    } catch (e) {
+      db.exec('rollback');
+      throw e;
+    }
+  }
+}
+
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   migrateRestaurantOwner(db);
   db.exec(SCHEMA);
   migrateLegacyOrders(db);
+  runDataMigrations(db);
   return db;
 }

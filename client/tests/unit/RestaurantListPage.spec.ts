@@ -540,6 +540,15 @@ describe('AddOrderPage', () => {
     expect(wrapper.find('[data-testid="topping-suggestions"]').exists()).toBe(false);
   });
 
+  it('has no "Add a restaurant" button on the list or the form', async () => {
+    const list = mount(RestaurantListPage);
+    await flushPromises();
+    const { wrapper } = await mountForm();
+    for (const html of [list.html(), wrapper.html()]) {
+      expect(html).not.toMatch(/add (a )?restaurant/i);
+    }
+  });
+
   it('limits the length of long text fields', async () => {
     const { wrapper } = await mountForm();
     for (const id of ['restaurant-input', 'title-input', 'item-name-input', 'notes-input']) {
