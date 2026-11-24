@@ -1,7 +1,7 @@
 <template>
   <img
     :src="logoUrl"
-    alt="Favorite Order"
+    alt="Favorite Orders"
     class="app-logo"
     :class="{ 'app-logo--large': large }"
     data-testid="app-logo"

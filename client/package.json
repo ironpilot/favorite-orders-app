@@ -1,7 +1,7 @@
 {
   "name": "james-app-project",
   "version": "1.0.0",
-  "description": "Favorite Order App - share favorite restaurant orders with friends and family",
+  "description": "Favorite Orders - share favorite restaurant orders with friends and family",
   "private": true,
   "type": "module",
   "scripts": {

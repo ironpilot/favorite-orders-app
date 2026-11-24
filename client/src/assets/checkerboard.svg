@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" preserveAspectRatio="xMidYMid slice">
+  <!-- Light 50s diner floor: soft checker tiles rotated 15 degrees -->
+  <defs>
+    <pattern id="tiles" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(15)">
+      <rect width="80" height="80" fill="#ffffff" />
+      <rect width="40" height="40" fill="#e9eaec" />
+      <rect x="40" y="40" width="40" height="40" fill="#e9eaec" />
+    </pattern>
+  </defs>
+  <rect x="-200" y="-200" width="2000" height="2000" fill="url(#tiles)" />
+</svg>
