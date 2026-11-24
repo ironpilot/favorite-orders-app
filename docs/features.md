@@ -7,13 +7,15 @@ Core product features extracted from `spec.md`, kept high level and product-focu
 **Description:** A simple account creation and sign-up experience so people can start using the app and keep their favorite orders under their own account.
 
 **User flow:**
-1. User opens the app.
-2. User creates an account.
+1. User opens the app and sees only sign-in or sign-up; nothing else is reachable until authentication succeeds.
+2. User creates an account or signs in.
 3. User lands on the restaurant list.
+4. On later launches the stored session is restored. An expired access token (1 hour) is silently refreshed with the refresh token (2 weeks); if both have expired, the user signs in again.
 
 **UI overview:**
 - A simple, phone-friendly sign-up screen.
 - After sign-up, the user sees the restaurant list.
+- A persistent "Operating offline" banner while a signed-in user is offline; the app keeps working with cached data. On reconnect, or on resume from the background, the session is re-checked (refresh or sign-in prompt) and the banner clears.
 
 ## 2. Restaurant List
 

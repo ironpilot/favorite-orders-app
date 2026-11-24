@@ -101,6 +101,30 @@ describe('router', () => {
     expect(router.currentRoute.value.path).toBe('/login');
   });
 
+  it.each([
+    '/tabs/restaurants',
+    '/tabs/restaurants/new-order',
+    '/tabs/restaurants/r1',
+    '/tabs/restaurants/r1/orders/o1',
+    '/tabs/shared',
+    '/tabs/profile',
+    '/tabs/friends',
+    '/some/unknown/page',
+  ])('blocks %s without an account and sends the user to sign-in', async (path) => {
+    const router = buildRouter(createMemoryHistory());
+    await router.push(path);
+    expect(router.currentRoute.value.path).toBe('/login');
+  });
+
+  it('lets a signed-in user open app pages and keeps them off the login screen', async () => {
+    state.userId = 'user-1';
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/friends');
+    expect(router.currentRoute.value.path).toBe('/tabs/friends');
+    await router.push('/login');
+    expect(router.currentRoute.value.path).toBe('/tabs/restaurants');
+  });
+
   it('makes the list reachable through the bottom tabs', () => {
     const tabs = routes.find((r) => r.path === '/tabs/');
     expect(tabs?.children?.some((c) => c.path === 'restaurants')).toBe(true);
@@ -113,10 +137,27 @@ describe('LoginPage', () => {
     await router.push('/login');
     const wrapper = mount(LoginPage, { global: { plugins: [router] } });
     await wrapper.find('[data-testid="auth-toggle"]').trigger('click');
+    Object.assign(wrapper.vm as unknown as Record<string, string>, {
+      displayName: 'New', email: 'new@example.com', phone: '+1 555 000 1234', password: 'secret123',
+    });
     await wrapper.find('form').trigger('submit');
     await flushPromises();
-    expect(state.signUp).toHaveBeenCalled();
+    expect(state.signUp).toHaveBeenCalledWith(expect.objectContaining({ phone: '+1 555 000 1234' }));
     expect(router.currentRoute.value.path).toBe('/tabs/restaurants');
+  });
+
+  it('rejects a weak password before contacting the server', async () => {
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/login');
+    const wrapper = mount(LoginPage, { global: { plugins: [router] } });
+    await wrapper.find('[data-testid="auth-toggle"]').trigger('click');
+    Object.assign(wrapper.vm as unknown as Record<string, string>, {
+      displayName: 'New', email: 'new@example.com', phone: '+15550001234', password: 'password',
+    });
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(state.signUp).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="auth-error"]').text()).toContain('letters and numbers');
   });
 });
 

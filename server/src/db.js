@@ -15,14 +15,37 @@ create table if not exists users (
   phone text,
   display_name text not null default '',
   password_hash text not null,
+  email_verified_at text,
   created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- Phone is required at sign-up and unique per account (older rows may have no phone).
+create unique index if not exists users_phone_unique on users (phone) where phone is not null;
 
 create table if not exists sessions (
   token text primary key,
   user_id text not null references users (id) on delete cascade,
   created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Email verification codes (stored hashed). A newer code invalidates older ones; rows also drive resend limits.
+create table if not exists email_verifications (
+  id text primary key,
+  user_id text not null references users (id) on delete cascade,
+  code_hash text not null,
+  expires_at integer not null,
+  created_at integer not null,
+  invalidated integer not null default 0
+);
+create index if not exists email_verifications_user_idx on email_verifications (user_id);
+
+-- Password reset links (token stored hashed), single use and time-limited.
+create table if not exists password_resets (
+  token_hash text primary key,
+  user_id text not null references users (id) on delete cascade,
+  expires_at integer not null,
+  used integer not null default 0
 );
 
 -- Restaurants are free text and persist independently of their orders.
@@ -181,6 +204,14 @@ function migrateRestaurantOwner(db) {
   }
 }
 
+// Older databases had no email verification; existing accounts are treated as already verified.
+function migrateEmailVerified(db) {
+  const columns = db.prepare('pragma table_info(users)').all().map((c) => c.name);
+  if (columns.length === 0 || columns.includes('email_verified_at')) return;
+  db.exec('alter table users add column email_verified_at text');
+  db.exec('update users set email_verified_at = created_at');
+}
+
 /** Adds an administrator-owned restaurant (managed outside the app) unless one with this name exists. */
 export function addAdminRestaurant(db, name) {
   const text = String(name ?? '').trim();
@@ -243,6 +274,7 @@ function runDataMigrations(db) {
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   migrateRestaurantOwner(db);
+  migrateEmailVerified(db);
   db.exec(SCHEMA);
   migrateLegacyOrders(db);
   runDataMigrations(db);

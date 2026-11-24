@@ -1,11 +1,14 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router';
 import type { RouteRecordRaw, Router, RouterHistory } from 'vue-router';
 import TabsPage from '@/views/TabsPage.vue';
-import { getCurrentUserId } from '@/services/auth';
+import { getCurrentAccount, isVerified } from '@/services/auth';
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/tabs/restaurants' },
   { path: '/login', component: () => import('@/views/LoginPage.vue'), meta: { guestOnly: true } },
+  { path: '/verify-email', component: () => import('@/views/VerifyEmailPage.vue'), meta: { verification: true } },
+  { path: '/forgot-password', component: () => import('@/views/ForgotPasswordPage.vue'), meta: { public: true } },
+  { path: '/reset-password', component: () => import('@/views/ResetPasswordPage.vue'), meta: { public: true } },
   {
     path: '/tabs/',
     component: TabsPage,
@@ -22,19 +25,23 @@ export const routes: RouteRecordRaw[] = [
       { path: 'friends', component: () => import('@/views/FriendsPage.vue') },
     ],
   },
+  // Unknown paths go to the app root, which the guard sends to sign-in when signed out.
+  { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
 
 export function buildRouter(history: RouterHistory = createWebHistory(import.meta.env.BASE_URL)): Router {
   const router = createRouter({ history, routes });
 
+  // Every page needs a verified account except sign-in / sign-up and the password reset screens.
+  // Signed-in users who have not verified their email can only reach the verification screen.
   router.beforeEach(async (to) => {
-    const requiresAuth = to.matched.some((r) => r.meta.requiresAuth);
+    if (to.matched.some((r) => r.meta.public)) return true;
     const guestOnly = to.matched.some((r) => r.meta.guestOnly);
-    if (!requiresAuth && !guestOnly) return true;
-
-    const userId = await getCurrentUserId();
-    if (requiresAuth && !userId) return '/login';
-    if (guestOnly && userId) return '/tabs/restaurants';
+    const verification = to.matched.some((r) => r.meta.verification);
+    const account = await getCurrentAccount();
+    if (!account) return guestOnly ? true : '/login';
+    if (!isVerified(account)) return verification ? true : '/verify-email';
+    if (guestOnly || verification) return '/tabs/restaurants';
     return true;
   });
 

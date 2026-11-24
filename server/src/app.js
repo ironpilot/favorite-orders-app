@@ -1,7 +1,7 @@
 // HTTP API for Favorite Order App. Access rules mirror the old row-level security:
 // users only see their own data plus orders explicitly shared with them by accepted friends.
 import { createServer } from 'node:http';
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -23,6 +23,36 @@ function verifyPassword(password, stored) {
 
 function publicUser(u) {
   return { id: u.id, email: u.email, phone: u.phone, displayName: u.display_name };
+}
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+
+export const VERIFICATION_TTL_MS = 15 * 60 * 1000;
+export const RESET_TTL_MS = 30 * 60 * 1000;
+export const RESEND_PER_MINUTE = 1;
+export const RESEND_PER_HOUR = 5;
+export const RESET_REQUESTED_MESSAGE = 'If an account exists for this email, a reset link has been sent';
+
+// Default mailer logs messages; production deployments pass a real one to createApp.
+const consoleMailer = { send: ({ to, subject, text }) => console.log(`[mail] to=${to} subject=${subject}\n${text}`) };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const DUPLICATE_ACCOUNT_MESSAGE =
+  'An account is already registered with this email or phone number. Try signing in instead.';
+
+// Phone numbers are stored digits-only with an optional leading +, so formatting differences still collide.
+function normalizePhone(value) {
+  if (typeof value !== 'string' || !value.trim()) throw new HttpError(400, 'Phone is required');
+  const phone = value.trim().replace(/[\s().-]/g, '');
+  if (!/^\+?\d{7,15}$/.test(phone)) throw new HttpError(400, 'Enter a valid phone number');
+  return phone;
+}
+
+function validatePassword(password) {
+  if (typeof password !== 'string' || !password) throw new HttpError(400, 'Password is required');
+  if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    throw new HttpError(400, 'Password must be at least 8 characters and contain letters and numbers');
+  }
 }
 
 export const LIMITS = { restaurantName: 100, title: 100, itemName: 100, ingredient: 60, notes: 1000 };
@@ -98,7 +128,10 @@ function parseItems(items) {
   });
 }
 
-export function createApp(db) {
+export function createApp(db, options = {}) {
+  const mailer = options.mailer ?? consoleMailer;
+  const clock = options.clock ?? (() => Date.now());
+  const appUrl = options.appUrl ?? process.env.APP_URL ?? 'http://localhost:5173';
   const now = () => new Date().toISOString();
   const one = (sql, ...p) => db.prepare(sql).get(...p);
   const all = (sql, ...p) => db.prepare(sql).all(...p);
@@ -183,10 +216,44 @@ export function createApp(db) {
     });
   }
 
+  function latestVerification(userId) {
+    return one(
+      'select * from email_verifications where user_id = ? and invalidated = 0 order by created_at desc limit 1',
+      userId,
+    );
+  }
+
+  function accountDto(u) {
+    const pending = u.email_verified_at ? null : latestVerification(u.id);
+    return {
+      ...publicUser(u),
+      emailVerified: !!u.email_verified_at,
+      verificationExpiresAt: pending ? new Date(pending.expires_at).toISOString() : null,
+    };
+  }
+
+  // Sends a fresh 6-digit code valid for 15 minutes; it invalidates any earlier code.
+  function sendVerification(user) {
+    const t = clock();
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const expiresAt = t + VERIFICATION_TTL_MS;
+    run('update email_verifications set invalidated = 1 where user_id = ?', user.id);
+    run(
+      'insert into email_verifications (id, user_id, code_hash, expires_at, created_at) values (?, ?, ?, ?, ?)',
+      randomUUID(), user.id, sha256(code), expiresAt, t,
+    );
+    mailer.send({
+      to: user.email,
+      subject: 'Your verification code',
+      text: `Your Favorite Order verification code is ${code}. It expires at ${new Date(expiresAt).toISOString()} (15 minutes).`,
+      code,
+    });
+  }
+
   function issueSession(user) {
     const token = randomBytes(32).toString('hex');
     run('insert into sessions (token, user_id) values (?, ?)', token, user.id);
-    return { token, user: publicUser(user) };
+    return { token, user: accountDto(user) };
   }
 
   function withTransaction(fn) {
@@ -226,18 +293,28 @@ export function createApp(db) {
   // [method, pattern, handler, requiresAuth]
   const routes = [
     ['POST', '/api/auth/signup', ({ body }) => {
-      const email = requireText(body.email, 'email');
-      if (typeof body.password !== 'string' || body.password.length < 6) {
-        throw new HttpError(400, 'password must be at least 6 characters');
+      const displayName = requireText(body.displayName, 'Name', 100);
+      const email = requireText(body.email, 'Email', 254);
+      if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address');
+      const phone = normalizePhone(body.phone);
+      validatePassword(body.password);
+      // One shared message for email and phone so sign-up never reveals which detail is taken.
+      if (one('select 1 from users where email = ? or phone = ?', email, phone)) {
+        throw new HttpError(409, DUPLICATE_ACCOUNT_MESSAGE);
       }
-      if (one('select 1 from users where email = ?', email)) throw new HttpError(409, 'Email already registered');
       const id = randomUUID();
-      run(
-        'insert into users (id, email, phone, display_name, password_hash) values (?, ?, ?, ?, ?)',
-        id, email, body.phone ?? null, typeof body.displayName === 'string' ? body.displayName.trim() : '',
-        hashPassword(body.password),
-      );
-      return [201, issueSession(one('select * from users where id = ?', id))];
+      try {
+        run(
+          'insert into users (id, email, phone, display_name, password_hash) values (?, ?, ?, ?, ?)',
+          id, email, phone, displayName, hashPassword(body.password),
+        );
+      } catch (e) {
+        if (/UNIQUE/i.test(String(e?.message))) throw new HttpError(409, DUPLICATE_ACCOUNT_MESSAGE);
+        throw e;
+      }
+      const created = one('select * from users where id = ?', id);
+      sendVerification(created);
+      return [201, issueSession(created)];
     }, false],
 
     ['POST', '/api/auth/signin', ({ body }) => {
@@ -248,12 +325,71 @@ export function createApp(db) {
       return [200, issueSession(user)];
     }, false],
 
+    // Signing out revokes the session token on the server; the client also clears it locally.
     ['POST', '/api/auth/signout', ({ token }) => {
       run('delete from sessions where token = ?', token);
       return [204];
-    }],
+    }, 'unverified'],
 
-    ['GET', '/api/auth/me', ({ user }) => [200, publicUser(user)]],
+    ['GET', '/api/auth/me', ({ user }) => [200, accountDto(user)], 'unverified'],
+
+    ['POST', '/api/auth/verify', ({ user, body }) => {
+      if (user.email_verified_at) return [200, accountDto(user)];
+      const code = String(body.code ?? '').trim();
+      const v = latestVerification(user.id);
+      if (!code || !v || v.code_hash !== sha256(code)) throw new HttpError(400, 'Invalid verification code');
+      if (v.expires_at <= clock()) throw new HttpError(400, 'Verification code has expired; request a new one');
+      run('update users set email_verified_at = ?, updated_at = ? where id = ?', now(), now(), user.id);
+      run('update email_verifications set invalidated = 1 where user_id = ?', user.id);
+      return [200, accountDto(one('select * from users where id = ?', user.id))];
+    }, 'unverified'],
+
+    // Resending is limited to 1 per minute and 5 per hour.
+    ['POST', '/api/auth/resend-verification', ({ user }) => {
+      if (user.email_verified_at) throw new HttpError(400, 'Email is already verified');
+      const t = clock();
+      const count = (since) => one(
+        'select count(*) as n from email_verifications where user_id = ? and created_at > ?', user.id, since,
+      ).n;
+      if (count(t - 60_000) >= RESEND_PER_MINUTE) throw new HttpError(429, 'Please wait a minute before requesting another code');
+      if (count(t - 3_600_000) >= RESEND_PER_HOUR) throw new HttpError(429, 'Too many codes requested; try again later');
+      sendVerification(user);
+      return [200, accountDto(user)];
+    }, 'unverified'],
+
+    // Always answers the same way so the response never reveals whether an account exists.
+    ['POST', '/api/auth/forgot-password', ({ body }) => {
+      const email = String(body.email ?? '').trim();
+      const user = email && one('select * from users where email = ?', email);
+      if (user && user.email_verified_at) {
+        const token = randomBytes(32).toString('hex');
+        run('update password_resets set used = 1 where user_id = ?', user.id);
+        run('insert into password_resets (token_hash, user_id, expires_at) values (?, ?, ?)',
+          sha256(token), user.id, clock() + RESET_TTL_MS);
+        const link = `${appUrl}/reset-password?token=${token}`;
+        mailer.send({
+          to: user.email,
+          subject: 'Reset your password',
+          text: `Reset your Favorite Order password within 30 minutes: ${link}`,
+          link,
+          token,
+        });
+      }
+      return [202, { message: RESET_REQUESTED_MESSAGE }];
+    }, false],
+
+    // A reset link works once; using it signs the account out everywhere.
+    ['POST', '/api/auth/reset-password', ({ body }) => {
+      const r = one('select * from password_resets where token_hash = ?', sha256(String(body.token ?? '')));
+      if (!r || r.used || r.expires_at <= clock()) throw new HttpError(400, 'This reset link is invalid or has expired');
+      validatePassword(body.password);
+      withTransaction(() => {
+        run('update users set password_hash = ?, updated_at = ? where id = ?', hashPassword(body.password), now(), r.user_id);
+        run('update password_resets set used = 1 where user_id = ?', r.user_id);
+        run('delete from sessions where user_id = ?', r.user_id);
+      });
+      return [204];
+    }, false],
 
     // Users can look up others by exact email or phone (never by name) to send friend requests.
     ['GET', '/api/users', ({ user, query }) => {
@@ -558,6 +694,9 @@ export function createApp(db) {
         if (route.auth) {
           user = token && one('select u.* from sessions s join users u on u.id = s.user_id where s.token = ?', token);
           if (!user) throw new HttpError(401, 'Not signed in');
+          if (route.auth !== 'unverified' && !user.email_verified_at) {
+            throw new HttpError(403, 'Email not verified');
+          }
         }
         const body = ['POST', 'PATCH'].includes(req.method) ? await readBody(req) : {};
         const [status, payload] = route.handler({ user, token, params, query: url.searchParams, body });

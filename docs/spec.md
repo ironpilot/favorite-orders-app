@@ -32,6 +32,9 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Add, remove, and update the favorite orders at each restaurant.
 - Text our order to a friend from a single button click.
 - Account creation and user sign-up experience.
+- Authentication gate: no application functionality or API call is available until the user has authenticated. On first startup the app shows only sign-in or registration; share links also require sign-in and resume after it.
+- Sessions: the access token lasts 1 hour and the refresh token 2 weeks. A stored session is restored on app load; an expired access token is silently refreshed; if both have expired or the refresh is rejected, the user is shown sign-in. Resume from the background applies the same check.
+- Offline for signed-in users: a persistent "Operating offline" banner is shown and the app keeps working with cached data. On reconnect the token expiry is checked as on resume (refresh, sign-in prompt, or hide the banner). Sign-up and sign-in need a connection; sign-out works offline.
 - Share an order with another user in the app (primary feature).
 - Friends system: users search by email or phone, send, cancel, accept, or decline friend requests (declines are silent), and can remove friends. Removing a friend revokes their access to shared orders; saved copies remain. Friend requests and acceptances trigger push notifications.
 - Direct sharing is only with accepted friends; multiple friends can be selected, and already-shared friends are marked. Recipients get a push notification, see the owner's latest version (deleted orders disappear), and can save a copy (restaurant matched by name or newly created). Owners can unshare.
@@ -61,7 +64,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - **Restaurant List**: See a list of restaurants that we have recorded favorite orders at, with order count, default-order preview, search and sort.
 - **Manage Favorite Orders**: Add, remove, and update the favorite orders at each restaurant, and mark one as the default.
 - **Text an Order**: Text our order to a friend from a single button click.
-- **Account Creation and Sign Up**: A simple account creation and user sign-up experience.
+- **Account Creation and Sign Up**: A simple account creation and user sign-up experience; the whole app is gated behind authentication, with persistent sessions and an offline banner.
 
 ## Constraints
 - Must use Ionic as the UI framework.
@@ -79,6 +82,8 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Manage orders at a restaurant: open restaurant -> add, update, or remove an order -> save.
 - Text an order: open an order -> tap the text button -> choose a contact -> message is prepared and sent.
 - Sign up: open app -> create account -> land on restaurant list.
+- Return to the app: open app -> stored session restored (silent refresh if the access token expired) -> restaurant list; if both tokens expired -> sign-in.
+- Go offline: signed-in user loses connection -> "Operating offline" banner, cached use continues -> connection returns -> expiry check -> refresh, sign-in, or banner hidden.
 - Add a favorite order: open app -> tap add -> type a restaurant and pick an auto-fill suggestion (administrator-owned or own) or keep the typed name as a new one -> add order items (quantity defaults to 1) and customize each item (remove, add, substitute, with common-toppings auto-fill) -> save.
 - Share an order: open an order -> tap share -> choose friends or a share link.
 - Share an order with app users: open an order -> tap share -> select one or more friends -> order appears in their shared orders and they get a push notification.
@@ -94,7 +99,8 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Native layer: Capacitor for iOS and Android builds, plus a PWA.
 - Backend: Node.js HTTP/JSON API server (`server/`) using the built-in `node:http` and `node:sqlite` modules (Node 22.13+), with no external runtime dependencies.
 - Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants (administrator-owned with no user owner, or user-created), orders (belonging to a restaurant), order items (belonging to an order, with a quantity defaulting to 1), order item customizations (remove, add, or substitute), a common toppings list, friendships, and order shares.
-- Auth: email/password accounts with scrypt-hashed passwords; sign-in returns a bearer token stored by the client and sent in the `Authorization` header.
+- Auth: email/password accounts with scrypt-hashed passwords; sign-in returns a 1-hour access token (sent in the `Authorization` header) and an opaque 14-day refresh token stored hashed server-side and rotated on each use via `POST /auth/refresh`; sign-out revokes it. The client stores both tokens with their expiry, retries once after a 401 with a single-flight refresh, and a central auth service gates routes.
+- Connectivity: `navigator.onLine` plus `online`/`offline` events confirmed by a failed request; an Ionic offline banner is shown at the app shell.
 - Access control: enforced in the API so users only see administrator-owned restaurants, their own restaurants and orders, plus orders shared with them by accepted friends; shared orders are read-only for recipients. Users cannot rename or remove administrator-owned restaurants.
 - Client configuration: the app reaches the API at `VITE_API_URL` (default `http://localhost:3000`).
 - Privacy: orders are private by default; sharing creates an explicit share record.

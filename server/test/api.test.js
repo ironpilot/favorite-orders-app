@@ -6,10 +6,13 @@ import { createApp } from '../src/app.js';
 let server;
 let base;
 let db;
+const mail = [];
+let clockOffset = 0;
+const lastMail = (to) => mail.filter((m) => m.to === to).at(-1);
 
 before(async () => {
   db = openDatabase(':memory:');
-  server = createApp(db);
+  server = createApp(db, { mailer: { send: (m) => mail.push(m) }, clock: () => Date.now() + clockOffset });
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://localhost:${server.address().port}`;
 });
@@ -26,11 +29,21 @@ async function call(method, path, { token, body } = {}) {
   return { status: res.status, data: text ? JSON.parse(text) : null };
 }
 
-async function signUp(email) {
+let phoneSeq = 7000000;
+const nextPhone = () => `+1555${phoneSeq++}`;
+
+async function signUpUnverified(email, phone = nextPhone()) {
   const { status, data } = await call('POST', '/api/auth/signup', {
-    body: { email, password: 'secret123', displayName: email.split('@')[0] },
+    body: { email, phone, password: 'secret123', displayName: email.split('@')[0] },
   });
   assert.equal(status, 201);
+  return data;
+}
+
+async function signUp(email, phone) {
+  const data = await signUpUnverified(email, phone);
+  const res = await call('POST', '/api/auth/verify', { token: data.token, body: { code: lastMail(email).code } });
+  assert.equal(res.status, 200);
   return data;
 }
 
@@ -59,11 +72,141 @@ describe('auth', () => {
     assert.equal((await call('GET', '/api/auth/me', { token })).status, 401);
   });
 
-  it('rejects duplicate emails and unauthenticated requests', async () => {
-    await signUp('dup@example.com');
-    const dup = await call('POST', '/api/auth/signup', { body: { email: 'dup@example.com', password: 'secret123' } });
-    assert.equal(dup.status, 409);
+  it('rejects duplicate email or phone with the same generic error, and unauthenticated requests', async () => {
+    await signUp('dup@example.com', '+15559990001');
+    const body = { displayName: 'Dup', password: 'secret123' };
+    const byEmail = await call('POST', '/api/auth/signup', { body: { ...body, email: 'DUP@example.com', phone: '+15559990002' } });
+    const byPhone = await call('POST', '/api/auth/signup', { body: { ...body, email: 'dup2@example.com', phone: '+1 (555) 999-0001' } });
+    assert.equal(byEmail.status, 409);
+    assert.equal(byPhone.status, 409);
+    assert.deepEqual(byEmail.data, byPhone.data);
     assert.equal((await call('GET', '/api/restaurants')).status, 401);
+  });
+
+  it('rejects missing or invalid fields and weak passwords', async () => {
+    const valid = { displayName: 'Val', email: 'val@example.com', phone: '+15558880001', password: 'secret123' };
+    const cases = [
+      { displayName: ' ' },
+      { email: undefined },
+      { email: 'not-an-email' },
+      { phone: undefined },
+      { phone: 'abc' },
+      { password: undefined },
+      { password: 'short1' },
+      { password: 'lettersonly' },
+      { password: '12345678' },
+    ];
+    for (const c of cases) {
+      const res = await call('POST', '/api/auth/signup', { body: { ...valid, ...c } });
+      assert.equal(res.status, 400, JSON.stringify(c));
+    }
+    assert.equal((await call('POST', '/api/auth/signup', { body: valid })).status, 201);
+  });
+});
+
+describe('email verification', () => {
+  it('sends a 15-minute code on sign-up and a valid code verifies the account', async () => {
+    const { token, user } = await signUpUnverified('verify@example.com');
+    assert.equal(user.emailVerified, false);
+    const expires = Date.parse(user.verificationExpiresAt) - Date.now();
+    assert.ok(expires > 14 * 60_000 && expires <= 15 * 60_000);
+    assert.match(lastMail('verify@example.com').code, /^\d{6}$/);
+
+    assert.equal((await call('POST', '/api/auth/verify', { token, body: { code: 'wrong' } })).status, 400);
+    const ok = await call('POST', '/api/auth/verify', { token, body: { code: lastMail('verify@example.com').code } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.emailVerified, true);
+    assert.equal((await call('GET', '/api/restaurants', { token })).status, 200);
+  });
+
+  it('blocks unverified users from the app, including after sign-in', async () => {
+    const { token } = await signUpUnverified('unverified@example.com');
+    assert.equal((await call('GET', '/api/restaurants', { token })).status, 403);
+    const signin = await call('POST', '/api/auth/signin', { body: { email: 'unverified@example.com', password: 'secret123' } });
+    assert.equal(signin.status, 200);
+    assert.equal(signin.data.user.emailVerified, false);
+    assert.equal((await call('GET', '/api/restaurants', { token: signin.data.token })).status, 403);
+    assert.equal((await call('GET', '/api/auth/me', { token })).data.emailVerified, false);
+  });
+
+  it('rejects expired and invalidated codes', async () => {
+    const { token } = await signUpUnverified('expire@example.com');
+    const first = lastMail('expire@example.com').code;
+    clockOffset = 61_000;
+    try {
+      assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 200);
+      const second = lastMail('expire@example.com').code;
+      if (first !== second) {
+        assert.equal((await call('POST', '/api/auth/verify', { token, body: { code: first } })).status, 400);
+      }
+      clockOffset = 61_000 + 15 * 60_000 + 1;
+      const expired = await call('POST', '/api/auth/verify', { token, body: { code: second } });
+      assert.equal(expired.status, 400);
+      assert.match(expired.data.error, /expired/);
+    } finally {
+      clockOffset = 0;
+    }
+  });
+
+  it('limits resends to 1 per minute and 5 per hour', async () => {
+    const { token } = await signUpUnverified('resend@example.com');
+    try {
+      assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 429);
+      for (let i = 1; i <= 4; i++) {
+        clockOffset = i * 61_000;
+        assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 200, `resend ${i}`);
+      }
+      clockOffset = 6 * 61_000;
+      assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 429);
+      clockOffset = 61 * 60_000 + 61_000;
+      assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 200);
+    } finally {
+      clockOffset = 0;
+    }
+  });
+});
+
+describe('sign out and forgot password', () => {
+  it('revokes the session on sign-out', async () => {
+    const { token } = await signUp('signout@example.com');
+    assert.equal((await call('POST', '/api/auth/signout', { token })).status, 204);
+    assert.equal((await call('GET', '/api/restaurants', { token })).status, 401);
+  });
+
+  it('resets the password once with an emailed link and signs out other sessions', async () => {
+    const { token } = await signUp('reset@example.com');
+    const res = await call('POST', '/api/auth/forgot-password', { body: { email: 'reset@example.com' } });
+    assert.equal(res.status, 202);
+    const { link, token: resetToken } = lastMail('reset@example.com');
+    assert.ok(link.includes(`/reset-password?token=${resetToken}`));
+
+    assert.equal((await call('POST', '/api/auth/reset-password', { body: { token: resetToken, password: 'weak' } })).status, 400);
+    assert.equal((await call('POST', '/api/auth/reset-password', { body: { token: resetToken, password: 'newpass456' } })).status, 204);
+    assert.equal((await call('POST', '/api/auth/reset-password', { body: { token: resetToken, password: 'other789x' } })).status, 400);
+    assert.equal((await call('GET', '/api/auth/me', { token })).status, 401);
+    const signin = await call('POST', '/api/auth/signin', { body: { email: 'reset@example.com', password: 'newpass456' } });
+    assert.equal(signin.status, 200);
+  });
+
+  it('rejects an expired reset link', async () => {
+    await signUp('resetexp@example.com');
+    await call('POST', '/api/auth/forgot-password', { body: { email: 'resetexp@example.com' } });
+    const { token } = lastMail('resetexp@example.com');
+    clockOffset = 31 * 60_000;
+    try {
+      assert.equal((await call('POST', '/api/auth/reset-password', { body: { token, password: 'newpass456' } })).status, 400);
+    } finally {
+      clockOffset = 0;
+    }
+  });
+
+  it('gives no account-existence hint for unknown emails', async () => {
+    await signUp('known@example.com');
+    const known = await call('POST', '/api/auth/forgot-password', { body: { email: 'known@example.com' } });
+    const unknown = await call('POST', '/api/auth/forgot-password', { body: { email: 'nobody@example.com' } });
+    assert.equal(known.status, unknown.status);
+    assert.deepEqual(known.data, unknown.data);
+    assert.equal(lastMail('nobody@example.com'), undefined);
   });
 });
 
@@ -300,16 +443,22 @@ describe('administrator-owned restaurants and auto-fill', () => {
   it('works when the toppings list is empty', async () => {
     const emptyDb = openDatabase(':memory:');
     emptyDb.exec('delete from toppings');
-    const emptyServer = createApp(emptyDb);
+    const emptyMail = [];
+    const emptyServer = createApp(emptyDb, { mailer: { send: (m) => emptyMail.push(m) } });
     await new Promise((resolve) => emptyServer.listen(0, resolve));
     const emptyBase = `http://localhost:${emptyServer.address().port}`;
     try {
       const signup = await fetch(`${emptyBase}/api/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'empty@example.com', password: 'secret123' }),
+        body: JSON.stringify({ email: 'empty@example.com', phone: '+15550009999', displayName: 'Empty', password: 'secret123' }),
       });
       const { token } = await signup.json();
+      await fetch(`${emptyBase}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code: emptyMail.at(-1).code }),
+      });
       const res = await fetch(`${emptyBase}/api/toppings?q=let`, { headers: { Authorization: `Bearer ${token}` } });
       assert.equal(res.status, 200);
       assert.deepEqual(await res.json(), []);

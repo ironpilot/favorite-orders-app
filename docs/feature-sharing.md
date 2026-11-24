@@ -39,7 +39,7 @@ Friends and Sharing lets users connect with friends and family through friend re
 ### Sharing via link
 - The owner can generate a share link for an order from the share action, and chooses an expiry (or no expiry) when generating it.
 - A link is reusable: anyone with the link can use it, and the owner can see everyone who has opened it.
-- The opener must be signed in; if not, they are asked to sign in or sign up first, then the link resumes.
+- The opener must be signed in; if not, they are asked to sign in or sign up first, then the link resumes. The link is also remembered through a token refresh or re-login after the session expires (see `feature-account-setup.md`).
 - If the link is opened by someone without the app installed, they are directed to the app store or the PWA, and the link resumes after install/sign-in.
 - A link opener can save the order to their own orders, same as for friend shares.
 - The owner can disable a link entirely, or remove individual openers' access.
