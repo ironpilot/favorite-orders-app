@@ -3,6 +3,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { COMMON_RESTAURANTS } from './common-restaurants.js';
+import { COMMON_TOPPINGS } from './common-toppings.js';
 
 const SCHEMA = `
 pragma foreign_keys = on;
@@ -104,6 +105,12 @@ create table if not exists order_shares (
   unique (order_id, shared_with)
 );
 create index if not exists order_shares_shared_with_idx on order_shares (shared_with);
+
+-- Common toppings offered as customization auto-fill; maintained by the administrator outside the app.
+create table if not exists toppings (
+  id text primary key,
+  name text not null unique collate nocase check (length(trim(name)) > 0)
+);
 `;
 
 // Older databases stored items as a JSON text list and customizations as one text field.
@@ -185,12 +192,34 @@ export function addAdminRestaurant(db, name) {
   return id;
 }
 
+/** Adds a common topping (managed outside the app) unless one with this name exists. */
+export function addAdminTopping(db, name) {
+  const text = String(name ?? '').trim();
+  if (!text) throw new Error('Topping name is required');
+  const existing = db.prepare('select id from toppings where name = ?').get(text);
+  if (existing) return existing.id;
+  const id = randomUUID();
+  db.prepare('insert into toppings (id, name) values (?, ?)').run(id, text);
+  return id;
+}
+
+/** Removes a common topping (managed outside the app). Saved orders keep their text. */
+export function removeAdminTopping(db, name) {
+  db.prepare('delete from toppings where name = ?').run(String(name ?? '').trim());
+}
+
 // One-time data migrations, recorded in schema_migrations so each runs once per database.
 const DATA_MIGRATIONS = [
   {
     id: '001-seed-common-restaurants',
     run: (db) => {
       for (const name of COMMON_RESTAURANTS) addAdminRestaurant(db, name);
+    },
+  },
+  {
+    id: '002-seed-common-toppings',
+    run: (db) => {
+      for (const name of COMMON_TOPPINGS) addAdminTopping(db, name);
     },
   },
 ];

@@ -28,13 +28,6 @@ function publicUser(u) {
 export const LIMITS = { restaurantName: 100, title: 100, itemName: 100, ingredient: 60, notes: 1000 };
 const CUSTOMIZATION_KINDS = ['remove', 'add', 'substitute'];
 
-// Common toppings offered as auto-fill for customizations, alongside the user's own past ingredients.
-export const COMMON_TOPPINGS = [
-  'Avocado', 'Bacon', 'BBQ Sauce', 'Cheese', 'Cilantro', 'Cucumber', 'Extra Cheese', 'Guacamole',
-  'Hot Sauce', 'Jalapeños', 'Ketchup', 'Lettuce', 'Mayonnaise', 'Mushrooms', 'Mustard', 'Olives',
-  'Onions', 'Pickles', 'Ranch', 'Salsa', 'Sour Cream', 'Spinach', 'Tomato',
-];
-
 function restaurantDto(r) {
   return { id: r.id, name: r.name, adminOwned: r.owner_id === null, updatedAt: r.updated_at };
 }
@@ -323,7 +316,8 @@ export function createApp(db) {
       return [200, rows.map(restaurantDto)];
     }],
 
-    // Auto-fill for customizations: common toppings plus ingredients the user used before.
+    // Auto-fill for customizations: administrator-maintained toppings (table `toppings`, seeded
+    // outside the app) plus ingredients the user used before. Suggestions never restrict input.
     ['GET', '/api/toppings', ({ user, query }) => {
       const q = (query.get('q') ?? '').trim().toLowerCase();
       const used = all(
@@ -338,7 +332,8 @@ export function createApp(db) {
       ).map((r) => r.name);
       const seen = new Set();
       const result = [];
-      for (const name of [...used, ...COMMON_TOPPINGS]) {
+      const common = all('select name from toppings').map((r) => r.name);
+      for (const name of [...used, ...common]) {
         const key = name.toLowerCase();
         if (seen.has(key) || !key.includes(q)) continue;
         seen.add(key);

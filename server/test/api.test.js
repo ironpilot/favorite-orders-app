@@ -1,6 +1,6 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addAdminRestaurant, openDatabase } from '../src/db.js';
+import { addAdminRestaurant, addAdminTopping, openDatabase, removeAdminTopping } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
 let server;
@@ -268,6 +268,54 @@ describe('administrator-owned restaurants and auto-fill', () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.data, ['Onion Rings', 'Onions']);
     assert.ok((await call('GET', '/api/toppings', { token })).data.length > 0);
+  });
+
+  it('returns the toppings list only to a signed-in user', async () => {
+    assert.equal((await call('GET', '/api/toppings?q=let')).status, 401);
+    const { token } = await signUp('toppings-auth@example.com');
+    const res = await call('GET', '/api/toppings?q=let', { token });
+    assert.equal(res.status, 200);
+    assert.ok(res.data.includes('Lettuce'));
+  });
+
+  it('reads toppings seeded and maintained by the administrator', async () => {
+    const { token } = await signUp('toppings-admin@example.com');
+    addAdminTopping(db, 'Zesty Relish');
+    assert.deepEqual((await call('GET', '/api/toppings?q=zesty', { token })).data, ['Zesty Relish']);
+    removeAdminTopping(db, 'Zesty Relish');
+    assert.deepEqual((await call('GET', '/api/toppings?q=zesty', { token })).data, []);
+  });
+
+  it('saves a topping that is not in the list as typed', async () => {
+    const { token } = await signUp('toppings-free@example.com');
+    const custom = [
+      { kind: 'remove', ingredient: 'Mystery Sprinkles' },
+      { kind: 'substitute', ingredient: 'Dragon Sauce', insteadOf: 'Moon Mayo' },
+    ];
+    const o = await saveOrder(token, 'Free Text Grill', { items: [{ name: 'Burger', customizations: custom }] });
+    const saved = (await call('GET', `/api/orders/${o.id}`, { token })).data;
+    assert.deepEqual(saved.items[0].customizations, custom);
+  });
+
+  it('works when the toppings list is empty', async () => {
+    const emptyDb = openDatabase(':memory:');
+    emptyDb.exec('delete from toppings');
+    const emptyServer = createApp(emptyDb);
+    await new Promise((resolve) => emptyServer.listen(0, resolve));
+    const emptyBase = `http://localhost:${emptyServer.address().port}`;
+    try {
+      const signup = await fetch(`${emptyBase}/api/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'empty@example.com', password: 'secret123' }),
+      });
+      const { token } = await signup.json();
+      const res = await fetch(`${emptyBase}/api/toppings?q=let`, { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), []);
+    } finally {
+      emptyServer.close();
+    }
   });
 });
 

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   orders: [] as unknown[],
   suggestions: [] as unknown[],
   toppings: [] as string[],
+  failToppings: false,
   failRestaurants: false,
   signUp: vi.fn(),
   signIn: vi.fn(),
@@ -49,7 +50,10 @@ vi.mock('@/lib/api', () => {
         return state.rows;
       }
       if (path.startsWith('/api/restaurant-suggestions')) return state.suggestions;
-      if (path.startsWith('/api/toppings')) return state.toppings;
+      if (path.startsWith('/api/toppings')) {
+        if (state.failToppings) throw new ApiError(500, 'Server down');
+        return state.toppings;
+      }
       if (method === 'POST' && path === '/api/orders') {
         state.bodies.push(body);
         return { id: 'o-new', restaurantId: 'r-new', items: [], isDefault: true };
@@ -76,6 +80,7 @@ beforeEach(() => {
   state.orders = [];
   state.suggestions = [];
   state.toppings = [];
+  state.failToppings = false;
   state.failRestaurants = false;
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   state.signIn.mockClear();
@@ -539,6 +544,84 @@ describe('AddOrderPage', () => {
     expect(vm.items[0].customizations[0].ingredient).toBe('Onions');
     expect(wrapper.find('[data-testid="topping-suggestions"]').exists()).toBe(false);
   });
+
+  type ToppingVm = { loadToppings: (c: unknown, f: string) => Promise<void> };
+
+  it('filters topping suggestions as the user types in remove, add and substitute fields', async () => {
+    const { vm, wrapper } = await mountForm();
+    state.toppings = ['Lettuce'];
+    const ext = wrapper.vm as unknown as ToppingVm;
+    for (const [i, kind] of ['remove', 'add', 'substitute'].entries()) {
+      await wrapper.find(`[data-testid="add-${kind}"]`).trigger('click');
+      const c = vm.items[0].customizations[i];
+      c.ingredient = 'let';
+      state.calls = [];
+      await ext.loadToppings(c, 'ingredient');
+      await flushPromises();
+      expect(state.calls).toContainEqual(['GET', '/api/toppings?q=let']);
+      const chips = wrapper.findAll('[data-testid="topping-suggestion"]');
+      expect(chips.map((x) => x.text())).toEqual(['Lettuce']);
+      await chips[0].trigger('click');
+      expect(c.ingredient).toBe('Lettuce');
+    }
+  });
+
+  it('offers suggestions for both parts of a substitution', async () => {
+    const { vm, wrapper } = await mountForm();
+    const ext = wrapper.vm as unknown as ToppingVm;
+    await wrapper.find('[data-testid="add-substitute"]').trigger('click');
+    const c = vm.items[0].customizations[0];
+    state.toppings = ['Mayonnaise'];
+    await ext.loadToppings(c, 'ingredient');
+    await flushPromises();
+    await wrapper.find('[data-testid="topping-suggestion"]').trigger('click');
+    state.toppings = ['Ketchup'];
+    c.insteadOf = 'ket';
+    await ext.loadToppings(c, 'insteadOf');
+    await flushPromises();
+    expect(state.calls).toContainEqual(['GET', '/api/toppings?q=ket']);
+    await wrapper.find('[data-testid="topping-suggestion"]').trigger('click');
+    expect([c.ingredient, c.insteadOf]).toEqual(['Mayonnaise', 'Ketchup']);
+  });
+
+  it('saves a topping that is not in the list as typed', async () => {
+    const { vm, wrapper } = await mountForm();
+    state.toppings = ['Lettuce'];
+    vm.restaurantName = 'Place';
+    vm.items[0].name = 'Burger';
+    await wrapper.find('[data-testid="add-remove"]').trigger('click');
+    const c = vm.items[0].customizations[0];
+    c.ingredient = 'Mystery Sprinkles';
+    await (wrapper.vm as unknown as ToppingVm).loadToppings(c, 'ingredient');
+    await flushPromises();
+    await vm.submit();
+    await flushPromises();
+    expect(state.bodies).toEqual([{
+      restaurantName: 'Place',
+      items: [{ name: 'Burger', quantity: 1, customizations: [{ kind: 'remove', ingredient: 'Mystery Sprinkles' }] }],
+    }]);
+  });
+
+  for (const [label, setup] of [
+    ['empty', () => { state.toppings = []; }],
+    ['failing', () => { state.failToppings = true; }],
+  ] as const) {
+    it(`keeps the form working when the toppings list is ${label}`, async () => {
+      const { vm, wrapper } = await mountForm();
+      setup();
+      vm.restaurantName = 'Place';
+      vm.items[0].name = 'Burger';
+      await wrapper.find('[data-testid="add-add"]').trigger('click');
+      const c = vm.items[0].customizations[0];
+      c.ingredient = 'Onions';
+      await (wrapper.vm as unknown as ToppingVm).loadToppings(c, 'ingredient');
+      await flushPromises();
+      expect(wrapper.find('[data-testid="topping-suggestions"]').exists()).toBe(false);
+      await vm.submit();
+      await flushPromises();
+      expect(state.bodies).toHaveLength(1);
+    });
+  }
 
   it('has no "Add a restaurant" button on the list or the form', async () => {
     const list = mount(RestaurantListPage);
