@@ -1,11 +1,7 @@
 <template>
   <ion-page>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>{{ isSignUp ? 'Create account' : 'Sign in' }}</ion-title>
-      </ion-toolbar>
-    </ion-header>
     <ion-content class="ion-padding">
+      <app-logo large />
       <form
         data-testid="auth-form"
         @submit.prevent="submit"

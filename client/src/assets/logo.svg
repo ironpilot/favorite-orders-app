@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 440 440" role="img" aria-label="Favorite Orders - Eat Here">
+  <title>Favorite Orders</title>
+  <defs>
+    <path id="arc-top" d="M 81,200 A 119,119 0 0 1 319,200" />
+    <path id="arc-bottom" d="M 50,200 A 150,150 0 0 0 350,200" />
+    <!-- Donut ring: outer radius 175, hollow centre radius 94 (12-unit red rims, like the bar) -->
+    <path id="ring" fill-rule="evenodd" d="M 25,200 A 175,175 0 1 0 375,200 A 175,175 0 1 0 25,200 Z M 106,200 A 94,94 0 1 0 294,200 A 94,94 0 1 0 106,200 Z" />
+    <g id="sign-shape">
+      <use xlink:href="#ring" href="#ring" />
+      <rect x="8" y="160" width="384" height="80" rx="14" />
+    </g>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8262b" />
+      <stop offset="1" stop-color="#b8141a" />
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35" />
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <filter id="bar-shadow" x="-10%" y="-40%" width="120%" height="180%">
+      <feGaussianBlur stdDeviation="4" />
+    </filter>
+  </defs>
+
+  <!-- Perspective: ~15 degree turn about the vertical axis, ~5 degree tilt -->
+  <g transform="translate(26 18) matrix(0.966 -0.07 0 0.996 0 14)">
+    <!-- Pole -->
+    <rect x="188" y="370" width="24" height="30" fill="#5f6770" />
+    <rect x="192" y="370" width="8" height="30" fill="#9aa3ad" />
+
+    <!-- Extruded depth of the sign -->
+    <g fill="#6e0a0e">
+      <use xlink:href="#sign-shape" href="#sign-shape" transform="translate(14 7)" />
+      <use xlink:href="#sign-shape" href="#sign-shape" transform="translate(11 5.5)" />
+      <use xlink:href="#sign-shape" href="#sign-shape" transform="translate(8 4)" />
+    </g>
+    <g fill="#8e0f14">
+      <use xlink:href="#sign-shape" href="#sign-shape" transform="translate(5 2.5)" />
+      <use xlink:href="#sign-shape" href="#sign-shape" transform="translate(2.5 1.2)" />
+    </g>
+
+    <!-- Donut face: red rim outside and inside, white band for the text -->
+    <use xlink:href="#ring" href="#ring" fill="url(#face)" />
+    <path fill="#ffffff" fill-rule="evenodd" d="M 37,200 A 163,163 0 1 0 363,200 A 163,163 0 1 0 37,200 Z M 94,200 A 106,106 0 1 0 306,200 A 106,106 0 1 0 94,200 Z" />
+
+    <text font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="44" fill="#d71920" letter-spacing="1" text-anchor="middle">
+      <textPath xlink:href="#arc-top" href="#arc-top" startOffset="50%">FAVORITE</textPath>
+    </text>
+    <text font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="44" fill="#d71920" letter-spacing="3" text-anchor="middle">
+      <textPath xlink:href="#arc-bottom" href="#arc-bottom" startOffset="50%">ORDERS</textPath>
+    </text>
+
+    <!-- Shadow under the bar so it looks raised -->
+    <rect x="12" y="168" width="384" height="80" rx="14" fill="#000000" opacity="0.45" filter="url(#bar-shadow)" />
+
+    <!-- Bar across the middle -->
+    <rect x="8" y="160" width="384" height="80" rx="14" fill="url(#face)" />
+    <rect x="22" y="172" width="356" height="56" rx="8" fill="#ffffff" />
+    <text x="200" y="215" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="42" fill="#d71920" letter-spacing="4" text-anchor="middle">EAT HERE</text>
+
+    <!-- Highlight -->
+    <use xlink:href="#ring" href="#ring" fill="url(#shine)" pointer-events="none" />
+  </g>
+</svg>

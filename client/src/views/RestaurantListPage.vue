@@ -2,6 +2,7 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
+        <app-logo slot="start" />
         <ion-title>Restaurants</ion-title>
       </ion-toolbar>
       <ion-toolbar v-if="restaurants.length > 0">

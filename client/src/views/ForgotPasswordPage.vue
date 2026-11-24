@@ -4,6 +4,7 @@
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-back-button default-href="/login" />
+          <app-logo />
         </ion-buttons>
         <ion-title>Forgot password</ion-title>
       </ion-toolbar>

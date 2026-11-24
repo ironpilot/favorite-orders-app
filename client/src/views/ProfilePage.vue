@@ -2,6 +2,7 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
+        <app-logo slot="start" />
         <ion-title>Profile</ion-title>
       </ion-toolbar>
     </ion-header>

@@ -4,6 +4,7 @@
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-back-button default-href="/tabs/restaurants" />
+          <app-logo />
         </ion-buttons>
         <ion-title data-testid="form-title">
           {{ editingId ? 'Edit order' : 'Add order' }}

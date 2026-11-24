@@ -4,6 +4,7 @@
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-back-button default-href="/tabs/restaurants" />
+          <app-logo />
         </ion-buttons>
         <ion-title data-testid="restaurant-title">
           {{ restaurant?.name ?? 'Restaurant' }}

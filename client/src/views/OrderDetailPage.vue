@@ -4,6 +4,7 @@
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-back-button :default-href="`/tabs/restaurants/${restaurantId}`" />
+          <app-logo />
         </ion-buttons>
         <ion-title data-testid="order-title">
           {{ order ? orderLabel(order) : 'Order' }}
