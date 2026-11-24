@@ -447,3 +447,51 @@ describe('friends and sharing', () => {
     assert.deepEqual((await call('GET', '/api/restaurants', { token: b.token })).data, []);
   });
 });
+
+describe('friends', () => {
+  const friends = async (token) => (await call('GET', '/api/friends', { token })).data;
+
+  it('searches by exact email or phone, never by name', async () => {
+    const a = await signUp('search-a@example.com');
+    await call('POST', '/api/auth/signup', { body: { email: 'carol@example.com', password: 'secret123', displayName: 'Carol', phone: '+15550001' } });
+    const find = async (q) => (await call('GET', `/api/users?q=${encodeURIComponent(q)}`, { token: a.token })).data;
+    assert.deepEqual((await find('CAROL@example.com')).map((u) => u.email), ['carol@example.com']);
+    assert.deepEqual((await find('+15550001')).map((u) => u.email), ['carol@example.com']);
+    assert.deepEqual(await find('Carol'), []);
+    assert.deepEqual(await find('carol@'), []);
+    assert.deepEqual(await find(''), []);
+  });
+
+  it('sends, accepts and removes friends for both users', async () => {
+    const a = await signUp('fa@example.com');
+    const b = await signUp('fb@example.com');
+    const req = (await call('POST', '/api/friends', { token: a.token, body: { userId: b.user.id } })).data;
+    assert.deepEqual((await friends(a.token)).map((f) => [f.status, f.direction, f.user.id]), [['pending', 'outgoing', b.user.id]]);
+    assert.deepEqual((await friends(b.token)).map((f) => [f.status, f.direction, f.user.id]), [['pending', 'incoming', a.user.id]]);
+    assert.equal((await call('POST', '/api/friends', { token: b.token, body: { userId: a.user.id } })).status, 409);
+
+    assert.equal((await call('POST', `/api/friends/${req.id}/accept`, { token: b.token })).status, 200);
+    assert.equal((await friends(a.token))[0].status, 'accepted');
+    assert.equal((await friends(b.token))[0].status, 'accepted');
+
+    assert.equal((await call('DELETE', `/api/friends/${req.id}`, { token: b.token })).status, 204);
+    assert.deepEqual(await friends(a.token), []);
+    assert.deepEqual(await friends(b.token), []);
+  });
+
+  it('declines silently so the sender can ask again, and lets the sender cancel', async () => {
+    const a = await signUp('da@example.com');
+    const b = await signUp('db@example.com');
+    const send = () => call('POST', '/api/friends', { token: a.token, body: { userId: b.user.id } });
+    const first = (await send()).data;
+    assert.equal((await call('DELETE', `/api/friends/${first.id}`, { token: b.token })).status, 204);
+    assert.deepEqual(await friends(a.token), []);
+    const second = await send();
+    assert.equal(second.status, 201);
+    assert.equal((await call('DELETE', `/api/friends/${second.data.id}`, { token: a.token })).status, 204);
+    assert.deepEqual(await friends(b.token), []);
+    const outsider = await signUp('dc@example.com');
+    const third = (await send()).data;
+    assert.equal((await call('DELETE', `/api/friends/${third.id}`, { token: outsider.token })).status, 404);
+  });
+});

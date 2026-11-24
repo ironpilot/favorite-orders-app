@@ -6,7 +6,7 @@
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
-      <p>Account settings and friends will appear here.</p>
+      <p>Account settings will appear here.</p>
     </ion-content>
   </ion-page>
 </template>

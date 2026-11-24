@@ -111,6 +111,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Search field and sort option on the restaurant list.
 - Pull-to-refresh (Ionic refresher) on all list pages: restaurant list, restaurant orders list, Shared orders list and friends list.
 - Tabs include a separate Shared tab for orders from friends.
+- Friends is a primary tab (Restaurants, Shared, Friends, Profile), not nested under Profile.
 - Prominent "add order" action button; no "Add a restaurant" button.
 - Restaurant auto-fill in the add-order form and common-toppings auto-fill on item customizations.
 - Simple order detail view with a share action.

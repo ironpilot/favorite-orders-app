@@ -255,12 +255,13 @@ export function createApp(db) {
 
     ['GET', '/api/auth/me', ({ user }) => [200, publicUser(user)]],
 
-    // Users can look up others by name, email, or phone to send friend requests.
+    // Users can look up others by exact email or phone (never by name) to send friend requests.
     ['GET', '/api/users', ({ user, query }) => {
-      const q = `%${(query.get('q') ?? '').trim()}%`;
+      const q = (query.get('q') ?? '').trim();
+      if (!q) return [200, []];
       const rows = all(
-        `select * from users where id <> ? and (display_name like ? or email like ? or phone like ?) limit 20`,
-        user.id, q, q, q,
+        `select * from users where id <> ? and (email = ? collate nocase or phone = ?) limit 20`,
+        user.id, q, q,
       );
       return [200, rows.map(publicUser)];
     }],
@@ -479,12 +480,13 @@ export function createApp(db) {
     }],
 
     ['POST', '/api/friends/:id/accept', ({ user, params }) => {
-      const f = one(`select * from friendships where id = ? and addressee_id = ?`, params.id, user.id);
+      const f = one(`select * from friendships where id = ? and addressee_id = ? and status = 'pending'`, params.id, user.id);
       if (!f) throw new HttpError(404, 'Friend request not found');
       run(`update friendships set status = 'accepted', updated_at = ? where id = ?`, now(), f.id);
       return [200, { id: f.id, status: 'accepted' }];
     }],
 
+    // Declines (silent), cancels a pending request, or removes a friend.
     ['DELETE', '/api/friends/:id', ({ user, params }) => {
       const res = run('delete from friendships where id = ? and ? in (requester_id, addressee_id)', params.id, user.id);
       if (res.changes === 0) throw new HttpError(404, 'Friendship not found');

@@ -72,7 +72,7 @@ Core product features extracted from `spec.md`, kept high level and product-focu
 Users can also remove a friend, which revokes that person's access to orders shared with them (copies they already saved remain). Users get push notifications for incoming friend requests and acceptances.
 
 **UI overview:**
-- A friends screen with a search field.
+- A Friends primary tab in the bottom tab bar, with a search field.
 - Friend requests that can be sent, cancelled, accepted, or declined, and a way to remove a friend.
 
 ## 5. Share an Order with Another User (Primary Feature)

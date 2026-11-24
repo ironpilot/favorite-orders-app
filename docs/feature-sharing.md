@@ -20,7 +20,8 @@ Friends and Sharing lets users connect with friends and family through friend re
 - A user can remove a friend. Removing a friend revokes the ex-friend's access to orders previously shared with them (they disappear from the Shared tab); orders the ex-friend already saved to their own orders remain.
 - Users are notified (push) of incoming friend requests and of accepted requests.
 - Once a request is accepted, both users are friends and can share orders with each other.
-- A friends screen shows the user's friends and friend requests (sent and received) and offers a search field.
+- Friends is a primary tab in the bottom tab bar (alongside Restaurants, Shared, and Profile), not nested under Profile.
+- The Friends tab shows the user's friends and friend requests (sent and received) and offers a search field.
 - The friends list supports pull-to-refresh and reloads when the user enters or returns to the screen.
 
 ### Sharing an order
@@ -93,7 +94,8 @@ Friends and Sharing lets users connect with friends and family through friend re
 Each step is a usable, reviewable increment and builds on the previous ones.
 
 ### Step 1: Friends
-Deliver the friends screen end to end.
+Deliver the Friends tab end to end.
+- Friends is a primary tab in the bottom tab bar, not under Profile.
 - Search for a user by email or phone.
 - Send, cancel, accept, and decline friend requests (declines are silent).
 - List friends and sent/received requests; remove a friend.
@@ -102,6 +104,7 @@ Deliver the friends screen end to end.
 Done when two users can become friends and unfriend each other.
 
 #### Tests
+- The tab bar shows a Friends tab that opens the friends screen.
 - Searching by exact email or phone finds a user; searching by name does not.
 - Sending a request shows it as sent for the sender and received for the recipient.
 - Accepting a request makes both users friends.
@@ -209,7 +212,7 @@ Status values: Not started, In progress, In review, Done, Blocked.
 
 | Step | Title | Status | Tests passing | Notes |
 |------|-------|--------|---------------|-------|
-| 1 | Friends | Not started | No | |
+| 1 | Friends | In review | Yes | Friends is a primary tab (`/tabs/friends`); search is exact email/phone only (2026-11-24) |
 | 2 | Share an order with friends and browse the Shared tab | Not started | No | |
 | 3 | Save copies and manage access | Not started | No | |
 | 4 | Push notifications | Not started | No | |
