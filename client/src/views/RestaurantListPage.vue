@@ -150,7 +150,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   IonPage,
   IonHeader,
@@ -172,10 +172,10 @@ import {
   IonSegmentButton,
   IonRefresher,
   IonRefresherContent,
-  onIonViewWillEnter,
+  onIonViewDidEnter,
 } from '@ionic/vue';
 import { add } from 'ionicons/icons';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   fetchMyRestaurants,
   filterAndSortRestaurants,
@@ -194,6 +194,8 @@ const search = ref('');
 const sort = ref<RestaurantSort>('recent');
 const visibleRestaurants = computed(() => filterAndSortRestaurants([...restaurants.value], search.value, sort.value));
 const router = useRouter();
+const route = useRoute();
+const LIST_PATH = '/tabs/restaurants';
 
 function openRestaurant(id: string) {
   router.push(`/tabs/restaurants/${id}`);
@@ -240,8 +242,17 @@ async function onRefresh(event: CustomEvent) {
   }
 }
 
-onIonViewWillEnter(load);
+onIonViewDidEnter(load);
 load();
+
+// Ionic may not fire view lifecycle hooks when returning after a `router.replace` (e.g. after
+// creating an order), so also reload whenever navigation lands back on the list.
+watch(
+  () => route.path,
+  (path, previous) => {
+    if (path.replace(/\/$/, '') === LIST_PATH && previous !== path) load();
+  },
+);
 
 defineExpose({ load, onRefresh, search, sort });
 </script>
