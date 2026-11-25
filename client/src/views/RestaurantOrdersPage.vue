@@ -67,6 +67,14 @@
             </p>
           </ion-label>
           <ion-badge
+            v-if="order.shared"
+            slot="end"
+            color="tertiary"
+            data-testid="shared-pill"
+          >
+            Shared
+          </ion-badge>
+          <ion-badge
             v-if="order.isDefault"
             slot="end"
             data-testid="default-badge"

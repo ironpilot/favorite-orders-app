@@ -82,8 +82,27 @@
           />
           Share
         </ion-button>
+        <ion-modal
+          :is-open="picking"
+          :keep-contents-mounted="true"
+          data-testid="share-modal"
+          @did-dismiss="picking = false"
+        >
+            <ion-header>
+              <ion-toolbar>
+                <ion-title>Share order</ion-title>
+                <ion-buttons slot="end">
+                  <ion-button
+                    data-testid="close-share"
+                    @click="picking = false"
+                  >
+                    Close
+                  </ion-button>
+                </ion-buttons>
+              </ion-toolbar>
+            </ion-header>
+            <ion-content class="ion-padding">
         <ion-list
-          v-if="picking"
           data-testid="friend-picker"
         >
           <ion-list-header>Share with friends</ion-list-header>
@@ -131,36 +150,60 @@
             Cancel
           </ion-button>
         </ion-list>
-        <p
-          v-if="shareMessage"
-          data-testid="share-message"
-        >
-          <ion-text :color="shareError ? 'danger' : 'success'">
-            {{ shareMessage }}
-          </ion-text>
-        </p>
-        <ion-list
+            </ion-content>
+        </ion-modal>
+        <ion-toast
+          :is-open="toast.open"
+          :message="toast.message"
+          :color="toast.color"
+          :duration="2500"
+          position="bottom"
+          data-testid="share-toast"
+          @did-dismiss="toast.open = false"
+        />
+        <ion-accordion-group
           v-if="shares.length > 0"
+          :value="sharedOpen ? 'shared-with' : undefined"
           data-testid="shared-with"
+          @ion-change="sharedOpen = $event.detail.value === 'shared-with'"
         >
-          <ion-list-header>Shared with</ion-list-header>
-          <ion-item
-            v-for="s in shares"
-            :key="s.id"
-            data-testid="shared-with-item"
-          >
-            <ion-label>{{ userLabel(s.user) }}</ion-label>
-            <ion-button
-              slot="end"
-              fill="clear"
-              color="danger"
-              data-testid="unshare"
-              @click="unshare(s.id)"
+          <ion-accordion value="shared-with">
+            <ion-item
+              slot="header"
+              data-testid="shared-with-header"
             >
-              Unshare
-            </ion-button>
-          </ion-item>
-        </ion-list>
+              <ion-label>Shared with</ion-label>
+              <ion-badge
+                slot="end"
+                color="tertiary"
+                data-testid="shared-count"
+              >
+                {{ shares.length }}
+              </ion-badge>
+            </ion-item>
+            <ion-list
+              slot="content"
+              data-testid="shared-with-list"
+            >
+              <ion-item
+                v-for="s in shares"
+                :key="s.id"
+                data-testid="shared-with-item"
+              >
+                <ion-label>{{ userLabel(s.user) }}</ion-label>
+                <ion-button
+                  slot="end"
+                  fill="clear"
+                  color="danger"
+                  data-testid="unshare"
+                  @click="unshare(s.id)"
+                >
+                  Unshare
+                </ion-button>
+              </ion-item>
+            </ion-list>
+          </ion-accordion>
+        </ion-accordion-group>
         <ion-button
           size="small"
           expand="block"
@@ -208,7 +251,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref } from 'vue';
+import { onUnmounted, reactive, ref } from 'vue';
 import {
   IonPage,
   IonHeader,
@@ -229,6 +272,10 @@ import {
   IonListHeader,
   IonCheckbox,
   IonNote,
+  IonToast,
+  IonModal,
+  IonAccordion,
+  IonAccordionGroup,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import {shareOutline, trashOutline} from 'ionicons/icons';
@@ -272,8 +319,9 @@ const picking = ref(false);
 const friends = ref<Friendship[]>([]);
 const shares = ref<OrderShare[]>([]);
 const selected = ref<string[]>([]);
-const shareMessage = ref('');
-const shareError = ref(false);
+/** Collapsed by default; the accordion's own chevron shows open or closed. */
+const sharedOpen = ref(false);
+const toast = reactive({ open: false, message: '', color: 'success' as 'success' | 'warning' | 'danger' });
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -297,9 +345,10 @@ async function load() {
   }
 }
 
-function setShareMessage(message: string, error: boolean) {
-  shareMessage.value = message;
-  shareError.value = error;
+function showToast(message: string, color: 'success' | 'warning' | 'danger') {
+  toast.message = message;
+  toast.color = color;
+  toast.open = true;
 }
 
 const alreadyShared = (userId: string) => shares.value.some((s) => s.user.id === userId);
@@ -313,9 +362,8 @@ function toggle(userId: string) {
 
 /** Opens the friend picker; only accepted friends are listed. Sharing needs a connection. */
 async function share() {
-  setShareMessage('', false);
   if (isOffline()) {
-    setShareMessage(OFFLINE_SHARE_MESSAGE, true);
+    showToast(OFFLINE_SHARE_MESSAGE, 'warning');
     return;
   }
   try {
@@ -325,33 +373,38 @@ async function share() {
     selected.value = [];
     picking.value = true;
   } catch (e) {
-    setShareMessage(errorText(e, 'Could not load friends'), true);
+    showToast(errorText(e, 'Could not load friends'), 'danger');
   }
 }
 
 async function confirmShare() {
+  if (isOffline()) {
+    showToast(OFFLINE_SHARE_MESSAGE, 'warning');
+    return;
+  }
   busy.value = true;
   try {
     const count = selected.value.length;
     await shareOrder(orderId, selected.value);
     picking.value = false;
     selected.value = [];
-    setShareMessage(`Shared with ${count} ${count === 1 ? 'friend' : 'friends'}`, false);
+    showToast(`Shared with ${count} ${count === 1 ? 'Friend' : 'Friends'}`, 'success');
     await loadShares();
   } catch (e) {
-    setShareMessage(errorText(e, 'Could not share order'), true);
+    showToast(errorText(e, 'Could not share order'), 'danger');
   } finally {
     busy.value = false;
   }
 }
 
 async function unshare(shareId: string) {
-  setShareMessage('', false);
   try {
+    const removed = shares.value.find((s) => s.id === shareId);
     await unshareOrder(shareId);
     shares.value = shares.value.filter((s) => s.id !== shareId);
+    showToast(`Unshared from ${removed ? userLabel(removed.user) : 'friend'}`, 'success');
   } catch (e) {
-    setShareMessage(errorText(e, 'Could not unshare order'), true);
+    showToast(errorText(e, 'Could not unshare order'), 'danger');
   }
 }
 
@@ -395,7 +448,7 @@ onIonViewWillEnter(load);
 load();
 
 defineExpose({
-  order, load, makeDefault, remove, share, confirmShare, unshare, toggle, selected, picking,
+  order, load, makeDefault, remove, share, confirmShare, unshare, toggle, selected, picking, toast, sharedOpen,
   confirmingDelete, deleteAlertButtons,
 });
 </script>

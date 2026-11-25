@@ -27,7 +27,7 @@ Friends and Sharing lets users connect with friends and family through friend re
 ### Sharing an order
 - Orders are private by default and visible only to the owner until shared.
 - Sharing is only allowed with accepted friends.
-- A user can open an order, tap a share action on the order detail view, and select a friend from a friend picker.
+- A user can open an order and tap the Share button on the order detail view, which opens a sharing-options modal (`ion-modal`) titled "Share order". The modal holds the friend picker (and later the share-link options) and is closed with Close or Cancel, or automatically after a successful share.
 - A user can select one or more friends in the picker; friends the order is already shared with are marked and cannot be shared with again.
 - Sharing sends the order to the selected friends; it appears in each friend's shared orders and each friend is notified by push notification.
 - A user can also share an order via a share link; see "Sharing via link" below.
@@ -92,6 +92,7 @@ Friends and Sharing lets users connect with friends and family through friend re
 - Notifications are push, for received orders and friend requests/acceptances.
 - Saving a shared order matches or creates a restaurant by name.
 - Multiple friends can be selected when sharing; duplicates are prevented.
+- The Share button opens a sharing-options modal rather than an inline picker; share-link options will be added to the same modal in Step 5.
 - Sharing status messages are temporary toasts (success, warning, danger), not inline text.
 - "Shared with" on order detail is a collapsible list with a count pill and chevron; order and restaurant lists show a "Shared" pill or nothing. Shared tab badges and link-share pills are out of scope for now.
 - Share links: owner-chosen expiry, reusable by anyone signed in, openers can save, store/PWA fallback, owner can disable the link or remove individual openers, unfriending revokes access.
@@ -122,7 +123,7 @@ Done when two users can become friends and unfriend each other.
 
 ### Step 2: Share an order with friends and browse the Shared tab
 Make direct sharing usable.
-- Share action on the order detail view with a multi-select friend picker; already-shared friends are marked and not selectable.
+- The Share button on the order detail view opens a sharing-options modal containing a multi-select friend picker; already-shared friends are marked and not selectable. The modal closes on Close/Cancel or after a successful share.
 - Shared tab listing orders by restaurant or person, with a read-only detail view.
 - Recipients always see the owner's latest version; deleted orders disappear.
 - Pull-to-refresh and reload on entry for the Shared list; sharing requires a connection.
@@ -132,6 +133,7 @@ Done when a user can share an order with friends and they can view it in their S
 
 #### Tests
 - Sharing is only possible with accepted friends.
+- Tapping Share opens the sharing-options modal; Close or Cancel dismisses it without sharing, and a successful share closes it.
 - Multiple friends can be selected; already-shared friends are marked and not selectable.
 - A shared order appears in each recipient's Shared tab, grouped by restaurant or person.
 - The shared detail view is read-only.
@@ -176,7 +178,7 @@ Done when each of those events notifies the relevant user.
 - Denied notification permission does not break friends or sharing flows.
 
 ### Step 5: Share links (core)
-- Owner generates a link with an owner-chosen expiry (or none).
+- Owner generates a link with an owner-chosen expiry (or none) from the sharing-options modal.
 - Opening the link in the app (after sign-in or sign-up) grants read-only access and adds the order to the opener's Shared tab; openers can save it.
 - Owner can see who opened the link and disable the link entirely.
 - Expired or disabled links show a no-longer-valid message.
@@ -229,8 +231,8 @@ Status values: Not started, In progress, In review, Done, Blocked.
 | Step | Title | Status | Tests passing | Notes |
 |------|-------|--------|---------------|-------|
 | 1 | Friends | In review | Yes | Friends is a primary tab (`/tabs/friends`); search is exact email/phone only (2026-11-24) |
-| 2 | Share an order with friends and browse the Shared tab | In progress | No | Multi-select friend picker on order detail; Shared tab (`/tabs/shared`) groups by restaurant or person, read-only detail at `/tabs/shared/:shareId` (2026-11-25); pending: share/offline toasts instead of inline messages |
-| 3 | Save copies and manage access | In progress | No | Save copy matches the recipient's own then admin restaurant by exact name, else creates one; "Shared with" list with Unshare; unfriending removes shares both ways (2026-11-25); pending: collapsible "Shared with" panel with count pill, unshare/save toasts, "Shared" pills on order and restaurant lists |
+| 2 | Share an order with friends and browse the Shared tab | In review | Yes | Share button opens a sharing-options `ion-modal` with the multi-select friend picker; Shared tab (`/tabs/shared`) groups by restaurant or person, read-only detail at `/tabs/shared/:shareId`; share outcomes are `ion-toast` messages (success "Shared with N Friend(s)", warning offline, danger errors) (2026-11-25) |
+| 3 | Save copies and manage access | In review | Yes | Save copy matches the recipient's own then admin restaurant by exact name, else creates one; collapsible "Shared with" `ion-accordion` (collapsed by default) with count pill and Unshare; unshare/save toasts; API returns `shared` on restaurant list and restaurant orders for "Shared" pills; unfriending removes shares both ways (2026-11-25) |
 | 4 | Push notifications | Not started | No | |
 | 5 | Share links (core) | Not started | No | |
 | 6 | Share link friend flow and access control | Not started | No | |

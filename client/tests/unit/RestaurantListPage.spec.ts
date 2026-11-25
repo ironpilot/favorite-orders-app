@@ -169,7 +169,7 @@ describe('fetchMyRestaurants', () => {
     state.rows = [{ id: 'r1', name: 'Taco Spot', updatedAt: '2026-01-01', orderCount: 2, defaultItems: [] }];
     const result = await fetchMyRestaurants();
     expect(state.calls).toContainEqual(['GET', '/api/restaurants']);
-    expect(result).toEqual([{ id: 'r1', name: 'Taco Spot', orderCount: 2, defaultItems: [], updatedAt: '2026-01-01' }]);
+    expect(result).toEqual([{ id: 'r1', name: 'Taco Spot', orderCount: 2, defaultItems: [], shared: false, updatedAt: '2026-01-01' }]);
   });
 
   it('returns nothing when signed out', async () => {
@@ -235,6 +235,19 @@ describe('RestaurantListPage', () => {
     await wrapper.find('[data-testid="add-order"]').trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.path).toBe('/tabs/restaurants/new-order');
+  });
+
+  it('shows a Shared pill only on restaurants with a shared order', async () => {
+    state.userId = 'user-1';
+    state.rows = [
+      { id: 'r1', name: 'Taco Spot', updatedAt: '2', orderCount: 1, defaultItems: [], shared: true },
+      { id: 'r2', name: 'Pho House', updatedAt: '1', orderCount: 1, defaultItems: [] },
+    ];
+    const wrapper = mount(RestaurantListPage);
+    await flushPromises();
+    const items = wrapper.findAll('[data-testid="restaurant-item"]');
+    expect(items[0].find('[data-testid="shared-pill"]').text()).toBe('Shared');
+    expect(items[1].find('[data-testid="shared-pill"]').exists()).toBe(false);
   });
 
   it('shows the empty state when the user has no restaurants', async () => {

@@ -520,12 +520,14 @@ export function createApp(db, options = {}) {
                        then (select max(o.updated_at) from orders o where o.restaurant_id = r.id and o.owner_id = ?)
                        else r.updated_at end as updated_at,
                   (select count(*) from orders o where o.restaurant_id = r.id and o.owner_id = ?) as order_count,
-                  (select o.id from orders o where o.restaurant_id = r.id and o.owner_id = ? and o.is_default = 1) as default_order_id
+                  (select o.id from orders o where o.restaurant_id = r.id and o.owner_id = ? and o.is_default = 1) as default_order_id,
+                  exists (select 1 from orders o join order_shares s on s.order_id = o.id
+                           where o.restaurant_id = r.id and o.owner_id = ?) as shared
              from restaurants r
             where r.owner_id = ?
                or (r.owner_id is null and exists (select 1 from orders o where o.restaurant_id = r.id and o.owner_id = ?))
          ) order by updated_at desc`,
-        user.id, user.id, user.id, user.id, user.id,
+        user.id, user.id, user.id, user.id, user.id, user.id,
       );
       const defaults = loadItems(rows.map((r) => r.default_order_id).filter(Boolean));
       // Distinct item names across all of the user's orders at each restaurant, for search.
@@ -545,6 +547,7 @@ export function createApp(db, options = {}) {
         defaultItems: r.default_order_id ? defaults.get(r.default_order_id).map((i) => i.name) : [],
         itemNames: itemNames.get(r.id) ?? [],
         adminOwned: r.owner_id === null,
+        shared: Boolean(r.shared),
         updatedAt: r.updated_at,
       }))];
     }],
@@ -609,7 +612,12 @@ export function createApp(db, options = {}) {
     ['GET', '/api/restaurants/:id/orders', ({ user, params }) => {
       visibleRestaurant(user.id, params.id);
       const rows = all('select * from orders where restaurant_id = ? and owner_id = ? order by updated_at desc', params.id, user.id);
-      return [200, ordersDto(rows)];
+      const sharedIds = new Set(all(
+        `select distinct s.order_id from order_shares s join orders o on o.id = s.order_id
+          where o.restaurant_id = ? and o.owner_id = ?`,
+        params.id, user.id,
+      ).map((r) => r.order_id));
+      return [200, ordersDto(rows).map((o) => ({ ...o, shared: sharedIds.has(o.id) }))];
     }],
 
     ['POST', '/api/restaurants/:id/orders', ({ user, params, body }) => {

@@ -75,21 +75,22 @@
         >
           Save to my orders
         </ion-button>
-        <p
-          v-if="saveMessage"
-          data-testid="save-message"
-        >
-          <ion-text color="success">
-            {{ saveMessage }}
-          </ion-text>
-        </p>
       </div>
+      <ion-toast
+        :is-open="toast.open"
+        :message="toast.message"
+        :color="toast.color"
+        :duration="2500"
+        position="bottom"
+        data-testid="save-toast"
+        @did-dismiss="toast.open = false"
+      />
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { reactive, ref } from 'vue';
 import {
   IonPage,
   IonHeader,
@@ -104,6 +105,7 @@ import {
   IonSpinner,
   IonText,
   IonButton,
+  IonToast,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import { useRoute } from 'vue-router';
@@ -119,7 +121,13 @@ const shared = ref<SharedOrder | null>(null);
 const loading = ref(true);
 const busy = ref(false);
 const errorMessage = ref('');
-const saveMessage = ref('');
+const toast = reactive({ open: false, message: '', color: 'success' as 'success' | 'danger' });
+
+function showToast(message: string, color: 'success' | 'danger') {
+  toast.message = message;
+  toast.color = color;
+  toast.open = true;
+}
 
 /** Read-only view of the owner's latest version; it is gone once the owner deletes or unshares it. */
 async function load() {
@@ -136,13 +144,11 @@ async function load() {
 
 async function saveCopy() {
   busy.value = true;
-  errorMessage.value = '';
-  saveMessage.value = '';
   try {
     await saveSharedOrder(shareId);
-    saveMessage.value = `Saved to your orders at ${shared.value?.restaurantName ?? 'the restaurant'}`;
+    showToast(`Saved to your orders at ${shared.value?.restaurantName ?? 'the restaurant'}`, 'success');
   } catch (e) {
-    errorMessage.value = e instanceof Error ? e.message : 'Could not save order';
+    showToast(e instanceof Error ? e.message : 'Could not save order', 'danger');
   } finally {
     busy.value = false;
   }
@@ -151,7 +157,7 @@ async function saveCopy() {
 onIonViewWillEnter(load);
 load();
 
-defineExpose({ shared, load, saveCopy });
+defineExpose({ shared, load, saveCopy, toast });
 </script>
 
 <style scoped>

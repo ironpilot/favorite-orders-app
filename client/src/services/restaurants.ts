@@ -10,6 +10,8 @@ export interface RestaurantSummary {
   itemNames?: string[];
   /** Administrator-owned restaurants are read-only for users. */
   adminOwned?: boolean;
+  /** True when any of the user's orders here is shared with someone. */
+  shared?: boolean;
   updatedAt: string;
 }
 
@@ -45,6 +47,8 @@ export interface Order {
   items: OrderItem[];
   notes: string | null;
   isDefault: boolean;
+  /** Set in restaurant order lists: true when the order is shared with anyone. */
+  shared?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +88,7 @@ export async function fetchMyRestaurants(): Promise<RestaurantSummary[]> {
     defaultItems: row.defaultItems ?? [],
     ...(row.itemNames ? { itemNames: row.itemNames } : {}),
     ...(row.adminOwned !== undefined ? { adminOwned: row.adminOwned } : {}),
+    shared: Boolean(row.shared),
     updatedAt: row.updatedAt,
   }));
 }

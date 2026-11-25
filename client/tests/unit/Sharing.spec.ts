@@ -114,7 +114,23 @@ describe('sharing an order', () => {
     expect(sharedWith).toHaveLength(2);
     expect(sharedWith[0]).toContain('Bob');
     expect(sharedWith[1]).toContain('Cat');
-    expect(wrapper.find('[data-testid="friend-picker"]').exists()).toBe(false);
+    expect((wrapper.vm as unknown as { picking: boolean }).picking).toBe(false);
+    const toast = (wrapper.vm as unknown as { toast: { open: boolean; message: string; color: string } }).toast;
+    expect(toast).toMatchObject({ open: true, message: 'Shared with 2 Friends', color: 'success' });
+    expect(wrapper.find('[data-testid="share-toast"]').exists()).toBe(true);
+  });
+
+  it('shows a single modal header after cancelling and reopening', async () => {
+    const wrapper = await openPicker();
+    await wrapper.find('[data-testid="cancel-share"]').trigger('click');
+    await flushPromises();
+    expect((wrapper.vm as unknown as { picking: boolean }).picking).toBe(false);
+    await wrapper.find('[data-testid="share-order"]').trigger('click');
+    await flushPromises();
+    const modal = wrapper.find('[data-testid="share-modal"]');
+    expect(modal.findAll('ion-header')).toHaveLength(1);
+    expect(modal.findAll('ion-title')).toHaveLength(1);
+    expect(modal.findAll('[data-testid="friend-picker"]')).toHaveLength(1);
   });
 
   it('marks already-shared friends and does not let them be selected again', async () => {
@@ -129,8 +145,11 @@ describe('sharing an order', () => {
   it('blocks sharing with a message while offline', async () => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
     const wrapper = await openPicker();
-    expect(wrapper.find('[data-testid="friend-picker"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="share-message"]').text()).toContain('connection');
+    expect((wrapper.vm as unknown as { picking: boolean }).picking).toBe(false);
+    const toast = (wrapper.vm as unknown as { toast: { open: boolean; message: string; color: string } }).toast;
+    expect(toast.open).toBe(true);
+    expect(toast.color).toBe('warning');
+    expect(toast.message).toContain('connection');
     expect(state.calls.some(([m, p]) => m === 'POST' && p.includes('/shares'))).toBe(false);
   });
 
@@ -138,11 +157,18 @@ describe('sharing an order', () => {
     state.shares = [{ id: 's-u-bob', sharedAt: '', user: bob }, { id: 's-u-cat', sharedAt: '', user: cat }];
     const wrapper = await mountWithRouter(OrderDetailPage, '/tabs/restaurants/r1/orders/o1', { id: 'r1', orderId: 'o1' });
     expect(texts(wrapper, 'shared-with-item')).toHaveLength(2);
+    expect((wrapper.vm as unknown as { sharedOpen: boolean }).sharedOpen).toBe(false);
+    expect(wrapper.find('[data-testid="shared-with-header"]').text()).toContain('Shared with');
+    expect(wrapper.find('[data-testid="shared-count"]').text()).toBe('2');
     await wrapper.find('[data-testid="unshare"]').trigger('click');
     await flushPromises();
     expect(state.calls).toContainEqual(['DELETE', '/api/shares/s-u-bob', undefined]);
     expect(texts(wrapper, 'shared-with-item')).toHaveLength(1);
     expect(texts(wrapper, 'shared-with-item')[0]).toContain('Cat');
+    expect(wrapper.find('[data-testid="shared-count"]').text()).toBe('1');
+    const toast = (wrapper.vm as unknown as { toast: { open: boolean; message: string; color: string } }).toast;
+    expect(toast).toMatchObject({ open: true, color: 'success' });
+    expect(toast.message).toContain('Bob');
   });
 });
 
@@ -216,7 +242,9 @@ describe('shared order detail', () => {
     await wrapper.find('[data-testid="save-copy"]').trigger('click');
     await flushPromises();
     expect(state.calls).toContainEqual(['POST', '/api/shared/s1/save', undefined]);
-    expect(wrapper.find('[data-testid="save-message"]').text()).toContain('Taco Spot');
+    const toast = (wrapper.vm as unknown as { toast: { open: boolean; message: string; color: string } }).toast;
+    expect(toast).toMatchObject({ open: true, color: 'success' });
+    expect(toast.message).toContain('Taco Spot');
   });
 
   it('tells the user when the order is no longer shared', async () => {

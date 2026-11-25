@@ -124,6 +124,14 @@
             </template>
           </ion-label>
           <ion-badge
+            v-if="restaurant.shared"
+            slot="end"
+            color="tertiary"
+            data-testid="shared-pill"
+          >
+            Shared
+          </ion-badge>
+          <ion-badge
             slot="end"
             color="medium"
             data-testid="order-count"
@@ -248,7 +256,7 @@ load();
 // Ionic may not fire view lifecycle hooks when returning after a `router.replace` (e.g. after
 // creating an order), so also reload whenever navigation lands back on the list.
 watch(
-  () => route.path,
+  () => route?.path ?? '',
   (path, previous) => {
     if (path.replace(/\/$/, '') === LIST_PATH && previous !== path) load();
   },

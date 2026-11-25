@@ -770,6 +770,24 @@ describe('friends and sharing', () => {
     assert.equal((await call('POST', `/api/shared/${shareOf(o1.id)}/save`, { token: a.token })).status, 404);
   });
 
+  it('flags shared orders and restaurants until the last friend is unshared', async () => {
+    const a = await signUp('pill-a@example.com');
+    const b = await signUp('pill-b@example.com');
+    await befriend(a, b);
+    const o = await saveOrder(a.token, 'Pill Place', { items: ['Tea'] });
+    const other = await saveOrder(a.token, 'Pill Place', { items: ['Cake'] });
+    const flags = async () => {
+      const r = (await call('GET', '/api/restaurants', { token: a.token })).data.find((x) => x.id === o.restaurantId);
+      const orders = (await call('GET', `/api/restaurants/${o.restaurantId}/orders`, { token: a.token })).data;
+      return { restaurant: r.shared, order: orders.find((x) => x.id === o.id).shared, other: orders.find((x) => x.id === other.id).shared };
+    };
+    assert.deepEqual(await flags(), { restaurant: false, order: false, other: false });
+    const shareId = (await call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } })).data.id;
+    assert.deepEqual(await flags(), { restaurant: true, order: true, other: false });
+    await call('DELETE', `/api/shares/${shareId}`, { token: a.token });
+    assert.deepEqual(await flags(), { restaurant: false, order: false, other: false });
+  });
+
   it('unfriending revokes shared orders but keeps saved copies', async () => {
     const a = await signUp('unf-a@example.com');
     const b = await signUp('unf-b@example.com');
