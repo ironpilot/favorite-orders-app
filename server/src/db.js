@@ -152,6 +152,27 @@ create table if not exists order_shares (
 );
 create index if not exists order_shares_shared_with_idx on order_shares (shared_with);
 
+-- Reusable share links (token stored hashed). expires_at null means no expiry; disabled links stop working.
+create table if not exists share_links (
+  id text primary key,
+  order_id text not null references orders (id) on delete cascade,
+  owner_id text not null references users (id) on delete cascade,
+  token_hash text not null unique,
+  expires_at integer,
+  disabled integer not null default 0,
+  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+create index if not exists share_links_order_idx on share_links (order_id);
+
+-- Everyone who opened a link. A revoked opener cannot regain access through the same link.
+create table if not exists share_link_opens (
+  link_id text not null references share_links (id) on delete cascade,
+  user_id text not null references users (id) on delete cascade,
+  opened_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  revoked integer not null default 0,
+  primary key (link_id, user_id)
+);
+
 -- Common toppings offered as customization auto-fill; maintained by the administrator outside the app.
 create table if not exists toppings (
   id text primary key,
@@ -227,6 +248,12 @@ function migrateRestaurantOwner(db) {
   }
 }
 
+// Shares granted by opening a link remember the link (null for direct friend shares).
+function migrateShareLinkColumn(db) {
+  const columns = db.prepare('pragma table_info(order_shares)').all().map((c) => c.name);
+  if (!columns.includes('link_id')) db.exec('alter table order_shares add column link_id text');
+}
+
 // Older databases had no email verification; existing accounts are treated as already verified.
 function migrateEmailVerified(db) {
   const columns = db.prepare('pragma table_info(users)').all().map((c) => c.name);
@@ -299,6 +326,7 @@ export function openDatabase(path = ':memory:') {
   migrateRestaurantOwner(db);
   migrateEmailVerified(db);
   db.exec(SCHEMA);
+  migrateShareLinkColumn(db);
   migrateLegacyOrders(db);
   runDataMigrations(db);
   return db;

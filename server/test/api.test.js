@@ -853,3 +853,123 @@ describe('friends', () => {
     assert.equal((await call('DELETE', `/api/friends/${third.id}`, { token: outsider.token })).status, 404);
   });
 });
+
+describe('share links', () => {
+  const shared = async (token) => (await call('GET', '/api/shared', { token })).data;
+  const createLink = async (owner, orderId, expiresInHours) => {
+    const res = await call('POST', `/api/orders/${orderId}/links`, { token: owner.token, body: { expiresInHours } });
+    assert.equal(res.status, 201);
+    return res.data;
+  };
+  const open = (user, link) => call('POST', `/api/links/${link.token}/open`, { token: user.token });
+  const links = async (owner, orderId) => (await call('GET', `/api/orders/${orderId}/links`, { token: owner.token })).data;
+
+  it('creates links with an expiry or none; only the owner can', async () => {
+    const a = await signUp('ln-a@example.com');
+    const b = await signUp('ln-b@example.com');
+    const o = await saveOrder(a.token, 'Link Place');
+    const forever = await createLink(a, o.id, null);
+    assert.equal(forever.expiresAt, null);
+    assert.equal(forever.active, true);
+    assert.match(forever.url, /\/link\/.+$/);
+    const day = await createLink(a, o.id, 24);
+    const ms = Date.parse(day.expiresAt) - Date.now();
+    assert.ok(ms > 23.9 * 3_600_000 && ms <= 24 * 3_600_000 + 1000);
+    assert.equal((await call('POST', `/api/orders/${o.id}/links`, { token: b.token, body: {} })).status, 404);
+    assert.equal((await call('POST', `/api/orders/${o.id}/links`, { token: a.token, body: { expiresInHours: -1 } })).status, 400);
+    assert.equal((await links(a, o.id)).length, 2);
+  });
+
+  it('gives non-friend openers read-only access in the Shared tab, reusable, and openers can save', async () => {
+    const a = await signUp('lo-a@example.com');
+    const b = await signUp('lo-b@example.com');
+    const c = await signUp('lo-c@example.com');
+    const o = await saveOrder(a.token, 'Opened Place', { items: ['Noodles'] });
+    const link = await createLink(a, o.id);
+    assert.equal((await call('POST', `/api/links/${link.token}/open`)).status, 401);
+
+    const res = await open(b, link);
+    assert.equal(res.status, 200);
+    assert.equal(res.data.friendPrompt, true);
+    assert.equal(res.data.owner.id, a.user.id);
+    assert.equal((await shared(b.token))[0].shareId, res.data.shareId);
+    assert.equal((await open(b, link)).data.shareId, res.data.shareId);
+    assert.equal((await open(c, link)).status, 200);
+    assert.equal((await call('PATCH', `/api/orders/${o.id}`, { token: b.token, body: { title: 'x' } })).status, 404);
+
+    const copy = await call('POST', `/api/shared/${res.data.shareId}/save`, { token: b.token });
+    assert.equal(copy.status, 201);
+    assert.equal(copy.data.ownerId, b.user.id);
+
+    const [l] = await links(a, o.id);
+    assert.deepEqual(l.openers.map((x) => x.user.id).sort(), [b.user.id, c.user.id].sort());
+    assert.equal((await open(a, link)).data.own, true);
+  });
+
+  it('rejects expired, disabled, and unknown links', async () => {
+    const a = await signUp('lx-a@example.com');
+    const b = await signUp('lx-b@example.com');
+    const o = await saveOrder(a.token, 'Expiry Place');
+    const short = await createLink(a, o.id, 1);
+    const other = await createLink(a, o.id);
+    assert.equal((await open(b, other)).status, 200);
+    clockOffset = 2 * 3_600_000;
+    try {
+      const expired = await open(b, short);
+      assert.equal(expired.status, 410);
+      assert.equal(expired.data.error, 'This link is no longer valid');
+    } finally {
+      clockOffset = 0;
+    }
+    const disabled = await call('DELETE', `/api/share-links/${other.id}`, { token: a.token });
+    assert.equal(disabled.data.disabled, true);
+    assert.deepEqual(await shared(b.token), []);
+    assert.equal((await open(b, other)).status, 410);
+    assert.equal((await call('POST', '/api/links/nope/open', { token: b.token })).status, 410);
+    assert.equal((await call('DELETE', `/api/share-links/${other.id}`, { token: b.token })).status, 404);
+  });
+
+  it('prompts only non-friends; a declined request removes the order, skipping keeps it', async () => {
+    const a = await signUp('lf-a@example.com');
+    const friend = await signUp('lf-f@example.com');
+    const b = await signUp('lf-b@example.com');
+    const c = await signUp('lf-c@example.com');
+    const req = (await call('POST', '/api/friends', { token: friend.token, body: { userId: a.user.id } })).data;
+    await call('POST', `/api/friends/${req.id}/accept`, { token: a.token });
+    const o = await saveOrder(a.token, 'Friendly Place');
+    const link = await createLink(a, o.id);
+    assert.equal((await open(friend, link)).data.friendPrompt, false);
+
+    assert.equal((await open(b, link)).data.friendPrompt, true);
+    const sent = (await call('POST', '/api/friends', { token: b.token, body: { userId: a.user.id } })).data;
+    assert.equal((await open(b, link)).data.friendPrompt, false);
+    assert.equal((await call('DELETE', `/api/friends/${sent.id}`, { token: a.token })).status, 204);
+    assert.deepEqual(await shared(b.token), []);
+
+    assert.equal((await open(c, link)).data.friendPrompt, true);
+    assert.equal((await shared(c.token)).length, 1);
+  });
+
+  it('lets the owner remove an individual opener, and unfriending revokes link access', async () => {
+    const a = await signUp('lr-a@example.com');
+    const b = await signUp('lr-b@example.com');
+    const c = await signUp('lr-c@example.com');
+    const o = await saveOrder(a.token, 'Revoke Place');
+    const link = await createLink(a, o.id);
+    await open(b, link);
+    await open(c, link);
+
+    const removed = await call('DELETE', `/api/share-links/${link.id}/openers/${b.user.id}`, { token: a.token });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(await shared(b.token), []);
+    assert.equal((await open(b, link)).status, 410);
+    assert.equal((await shared(c.token)).length, 1);
+
+    const req = (await call('POST', '/api/friends', { token: c.token, body: { userId: a.user.id } })).data;
+    await call('POST', `/api/friends/${req.id}/accept`, { token: a.token });
+    assert.equal((await shared(c.token)).length, 1);
+    await call('DELETE', `/api/friends/${req.id}`, { token: a.token });
+    assert.deepEqual(await shared(c.token), []);
+    assert.equal((await open(c, link)).status, 410);
+  });
+});

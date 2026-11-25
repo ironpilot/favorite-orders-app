@@ -33,6 +33,7 @@ export const REFRESH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 export const RESEND_PER_MINUTE = 1;
 export const RESEND_PER_HOUR = 5;
 export const RESET_REQUESTED_MESSAGE = 'If an account exists for this email, a reset link has been sent';
+export const LINK_INVALID_MESSAGE = 'This link is no longer valid';
 
 // Default mailer logs messages; production deployments pass a real one to createApp.
 const consoleMailer = { send: ({ to, subject, text }) => console.log(`[mail] to=${to} subject=${subject}\n${text}`) };
@@ -215,6 +216,45 @@ export function createApp(db, options = {}) {
         );
       });
     });
+  }
+
+  // Revokes link-granted access the owner gave to a user: the share goes and the opener cannot reopen it.
+  function revokeLinkAccess(ownerId, userId) {
+    run(
+      `update share_link_opens set revoked = 1 where user_id = ?
+         and link_id in (select id from share_links where owner_id = ?)`,
+      userId, ownerId,
+    );
+    run('delete from order_shares where shared_by = ? and shared_with = ? and link_id is not null', ownerId, userId);
+  }
+
+  function shareLinkDto(l) {
+    const openers = all(
+      `select o.opened_at, o.revoked, u.id as uid, u.email, u.phone, u.display_name
+         from share_link_opens o join users u on u.id = o.user_id
+        where o.link_id = ? order by o.opened_at`,
+      l.id,
+    );
+    const expired = l.expires_at !== null && l.expires_at <= clock();
+    return {
+      id: l.id,
+      orderId: l.order_id,
+      expiresAt: l.expires_at === null ? null : new Date(l.expires_at).toISOString(),
+      disabled: l.disabled === 1,
+      active: l.disabled === 0 && !expired,
+      createdAt: l.created_at,
+      openers: openers.map((o) => ({
+        openedAt: o.opened_at,
+        revoked: o.revoked === 1,
+        user: publicUser({ id: o.uid, email: o.email, phone: o.phone, display_name: o.display_name }),
+      })),
+    };
+  }
+
+  function ownLink(userId, id) {
+    const l = one('select * from share_links where id = ? and owner_id = ?', id, userId);
+    if (!l) throw new HttpError(404, 'Share link not found');
+    return l;
   }
 
   function latestVerification(userId) {
@@ -744,10 +784,18 @@ export function createApp(db, options = {}) {
       if (!f) throw new HttpError(404, 'Friendship not found');
       withTransaction(() => {
         run('delete from friendships where id = ?', f.id);
-        run(
-          `delete from order_shares where (shared_by = ? and shared_with = ?) or (shared_by = ? and shared_with = ?)`,
-          f.requester_id, f.addressee_id, f.addressee_id, f.requester_id,
-        );
+        if (f.status === 'accepted') {
+          // Unfriending also revokes access gained through share links, both ways.
+          revokeLinkAccess(f.requester_id, f.addressee_id);
+          revokeLinkAccess(f.addressee_id, f.requester_id);
+          run(
+            `delete from order_shares where (shared_by = ? and shared_with = ?) or (shared_by = ? and shared_with = ?)`,
+            f.requester_id, f.addressee_id, f.addressee_id, f.requester_id,
+          );
+        } else if (user.id === f.addressee_id) {
+          // Declining a request from a link opener removes the link-shared orders from their Shared tab.
+          revokeLinkAccess(f.addressee_id, f.requester_id);
+        }
       });
       return [204];
     }],
@@ -778,7 +826,7 @@ export function createApp(db, options = {}) {
     ['GET', '/api/orders/:id/shares', ({ user, params }) => {
       ownOrder(user.id, params.id);
       const rows = all(
-        `select s.id as share_id, s.created_at as shared_at, u.id as uid, u.email, u.phone, u.display_name
+        `select s.id as share_id, s.created_at as shared_at, s.link_id, u.id as uid, u.email, u.phone, u.display_name
            from order_shares s join users u on u.id = s.shared_with
           where s.order_id = ? order by s.created_at`,
         params.id,
@@ -786,6 +834,7 @@ export function createApp(db, options = {}) {
       return [200, rows.map((r) => ({
         id: r.share_id,
         sharedAt: r.shared_at,
+        viaLink: r.link_id !== null,
         user: publicUser({ id: r.uid, email: r.email, phone: r.phone, display_name: r.display_name }),
       }))];
     }],
@@ -838,9 +887,85 @@ export function createApp(db, options = {}) {
     }],
 
     ['DELETE', '/api/shares/:id', ({ user, params }) => {
-      const res = run('delete from order_shares where id = ? and ? in (shared_by, shared_with)', params.id, user.id);
-      if (res.changes === 0) throw new HttpError(404, 'Share not found');
+      const s = one('select * from order_shares where id = ? and ? in (shared_by, shared_with)', params.id, user.id);
+      if (!s) throw new HttpError(404, 'Share not found');
+      withTransaction(() => {
+        run('delete from order_shares where id = ?', s.id);
+        // When the owner removes a link opener, the opener cannot regain access through that link.
+        if (s.link_id && s.shared_by === user.id) {
+          run('update share_link_opens set revoked = 1 where link_id = ? and user_id = ?', s.link_id, s.shared_with);
+        }
+      });
       return [204];
+    }],
+
+    // Share links ---------------------------------------------------------------
+    // The owner creates a reusable link with an expiry in hours, or none (expiresInHours null/absent).
+    ['POST', '/api/orders/:id/links', ({ user, params, body }) => {
+      ownOrder(user.id, params.id);
+      const hours = body.expiresInHours;
+      if (hours !== undefined && hours !== null && (typeof hours !== 'number' || !(hours > 0))) {
+        throw new HttpError(400, 'expiresInHours must be a positive number');
+      }
+      const id = randomUUID();
+      const token = randomBytes(24).toString('base64url');
+      const expiresAt = hours ? clock() + hours * 3_600_000 : null;
+      run('insert into share_links (id, order_id, owner_id, token_hash, expires_at) values (?, ?, ?, ?, ?)',
+        id, params.id, user.id, sha256(token), expiresAt);
+      return [201, { ...shareLinkDto(one('select * from share_links where id = ?', id)), token, url: `${appUrl}/link/${token}` }];
+    }],
+
+    // The owner sees each link of an order and everyone who opened it.
+    ['GET', '/api/orders/:id/links', ({ user, params }) => {
+      ownOrder(user.id, params.id);
+      return [200, all('select * from share_links where order_id = ? order by created_at desc', params.id).map(shareLinkDto)];
+    }],
+
+    // Disabling a link stops it working and removes the access everyone gained through it.
+    ['DELETE', '/api/share-links/:id', ({ user, params }) => {
+      const l = ownLink(user.id, params.id);
+      withTransaction(() => {
+        run('update share_links set disabled = 1 where id = ?', l.id);
+        run('delete from order_shares where link_id = ?', l.id);
+      });
+      return [200, shareLinkDto(one('select * from share_links where id = ?', l.id))];
+    }],
+
+    // Removes one opener's access (friend or not); they cannot regain it through this link.
+    ['DELETE', '/api/share-links/:id/openers/:userId', ({ user, params }) => {
+      const l = ownLink(user.id, params.id);
+      const res = run('update share_link_opens set revoked = 1 where link_id = ? and user_id = ?', l.id, params.userId);
+      if (res.changes === 0) throw new HttpError(404, 'Opener not found');
+      run('delete from order_shares where link_id = ? and shared_with = ?', l.id, params.userId);
+      return [200, shareLinkDto(l)];
+    }],
+
+    // Opening a link grants read-only access and adds the order to the opener's Shared tab.
+    // friendPrompt tells the app to offer a friend request (not shown to friends or pending requests).
+    ['POST', '/api/links/:token/open', ({ user, params }) => {
+      const l = one('select * from share_links where token_hash = ?', sha256(params.token));
+      if (!l || l.disabled || (l.expires_at !== null && l.expires_at <= clock())) {
+        throw new HttpError(410, LINK_INVALID_MESSAGE);
+      }
+      const owner = publicUser(one('select * from users where id = ?', l.owner_id));
+      if (l.owner_id === user.id) return [200, { own: true, orderId: l.order_id, owner, friendPrompt: false }];
+      const opened = one('select * from share_link_opens where link_id = ? and user_id = ?', l.id, user.id);
+      if (opened?.revoked) throw new HttpError(410, LINK_INVALID_MESSAGE);
+      const share = withTransaction(() => {
+        if (!opened) run('insert into share_link_opens (link_id, user_id) values (?, ?)', l.id, user.id);
+        let s = one('select id from order_shares where order_id = ? and shared_with = ?', l.order_id, user.id);
+        if (!s) {
+          s = { id: randomUUID() };
+          run('insert into order_shares (id, order_id, shared_by, shared_with, link_id) values (?, ?, ?, ?, ?)',
+            s.id, l.order_id, l.owner_id, user.id, l.id);
+        }
+        return s;
+      });
+      const related = one(
+        `select 1 from friendships where (requester_id = ? and addressee_id = ?) or (requester_id = ? and addressee_id = ?)`,
+        user.id, l.owner_id, l.owner_id, user.id,
+      );
+      return [200, { own: false, shareId: share.id, orderId: l.order_id, owner, friendPrompt: !related }];
     }],
   ].map(([method, pattern, handler, auth = true]) => {
     const keys = [];

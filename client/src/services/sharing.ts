@@ -15,6 +15,8 @@ export interface SharedOrder {
 export interface OrderShare {
   id: string;
   sharedAt: string;
+  /** True when the access came from opening a share link. */
+  viaLink?: boolean;
   user: PublicUser;
 }
 
@@ -44,6 +46,88 @@ export async function unshareOrder(shareId: string): Promise<void> {
 /** Saves an independent copy under a restaurant matched by name, or a new one. */
 export function saveSharedOrder(shareId: string): Promise<Order> {
   return api<Order>('POST', `/api/shared/${encodeURIComponent(shareId)}/save`);
+}
+
+/** Someone who opened a share link; revoked openers lost access. */
+export interface LinkOpener {
+  openedAt: string;
+  revoked: boolean;
+  user: PublicUser;
+}
+
+/** A reusable share link; token and url are only returned when the link is created. */
+export interface ShareLink {
+  id: string;
+  orderId: string;
+  expiresAt: string | null;
+  disabled: boolean;
+  active: boolean;
+  createdAt: string;
+  openers: LinkOpener[];
+  token?: string;
+  url?: string;
+}
+
+/** Result of opening a link: the order is in the Shared tab under shareId (unless it is the user's own). */
+export interface OpenedLink {
+  own: boolean;
+  shareId?: string;
+  orderId: string;
+  owner: PublicUser;
+  friendPrompt: boolean;
+}
+
+export const LINK_INVALID_MESSAGE = 'This link is no longer valid';
+export const LINK_EXPIRY_OPTIONS: { label: string; hours: number | null }[] = [
+  { label: '1 day', hours: 24 },
+  { label: '7 days', hours: 24 * 7 },
+  { label: '30 days', hours: 24 * 30 },
+  { label: 'No expiry', hours: null },
+];
+
+export async function fetchShareLinks(orderId: string): Promise<ShareLink[]> {
+  return (await api<ShareLink[]>('GET', `/api/orders/${encodeURIComponent(orderId)}/links`)) ?? [];
+}
+
+/** Creates a reusable link; expiresInHours null means it never expires. Needs a connection. */
+export async function createShareLink(orderId: string, expiresInHours: number | null): Promise<ShareLink> {
+  if (isOffline()) throw new Error(OFFLINE_SHARE_MESSAGE);
+  return api<ShareLink>('POST', `/api/orders/${encodeURIComponent(orderId)}/links`, { expiresInHours });
+}
+
+/** Disables a link and removes the access everyone gained through it. */
+export function disableShareLink(linkId: string): Promise<ShareLink> {
+  return api<ShareLink>('DELETE', `/api/share-links/${encodeURIComponent(linkId)}`);
+}
+
+/** Removes one opener's access, friend or not. */
+export function removeLinkOpener(linkId: string, userId: string): Promise<ShareLink> {
+  return api<ShareLink>('DELETE', `/api/share-links/${encodeURIComponent(linkId)}/openers/${encodeURIComponent(userId)}`);
+}
+
+export function openShareLink(token: string): Promise<OpenedLink> {
+  return api<OpenedLink>('POST', `/api/links/${encodeURIComponent(token)}/open`);
+}
+
+// A link opened while signed out is remembered until sign-in or sign-up finishes, then resumed.
+const PENDING_LINK_KEY = 'pendingShareLink';
+
+export function rememberPendingLink(token: string): void {
+  try {
+    localStorage.setItem(PENDING_LINK_KEY, token);
+  } catch {
+    // Storage may be unavailable; the user can open the link again.
+  }
+}
+
+export function takePendingLink(): string | null {
+  try {
+    const token = localStorage.getItem(PENDING_LINK_KEY);
+    if (token) localStorage.removeItem(PENDING_LINK_KEY);
+    return token;
+  } catch {
+    return null;
+  }
 }
 
 export type SharedGrouping = 'restaurant' | 'person';

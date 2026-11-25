@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from '@ionic/vue-router';
 import type { RouteRecordRaw, Router, RouterHistory } from 'vue-router';
 import TabsPage from '@/views/TabsPage.vue';
 import { getCurrentAccount, isVerified } from '@/services/auth';
+import { rememberPendingLink, takePendingLink } from '@/services/sharing';
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/tabs/restaurants' },
@@ -9,6 +10,8 @@ export const routes: RouteRecordRaw[] = [
   { path: '/verify-email', component: () => import('@/views/VerifyEmailPage.vue'), meta: { verification: true } },
   { path: '/forgot-password', component: () => import('@/views/ForgotPasswordPage.vue'), meta: { public: true } },
   { path: '/reset-password', component: () => import('@/views/ResetPasswordPage.vue'), meta: { public: true } },
+  // Share links; a signed-out opener signs in or signs up first and the link then resumes.
+  { path: '/link/:token', component: () => import('@/views/OpenLinkPage.vue'), props: true, meta: { shareLink: true } },
   {
     path: '/tabs/',
     component: TabsPage,
@@ -40,8 +43,19 @@ export function buildRouter(history: RouterHistory = createWebHistory(import.met
     const guestOnly = to.matched.some((r) => r.meta.guestOnly);
     const verification = to.matched.some((r) => r.meta.verification);
     const account = await getCurrentAccount();
-    if (!account) return guestOnly ? true : '/login';
-    if (!isVerified(account)) return verification ? true : '/verify-email';
+    const shareLink = to.matched.some((r) => r.meta.shareLink);
+    if (!account) {
+      if (shareLink) rememberPendingLink(String(to.params.token));
+      return guestOnly ? true : '/login';
+    }
+    if (!isVerified(account)) {
+      if (shareLink) rememberPendingLink(String(to.params.token));
+      return verification ? true : '/verify-email';
+    }
+    if (!shareLink) {
+      const pending = takePendingLink();
+      if (pending) return `/link/${encodeURIComponent(pending)}`;
+    }
     if (guestOnly || verification) return '/tabs/restaurants';
     return true;
   });

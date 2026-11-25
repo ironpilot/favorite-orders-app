@@ -150,6 +150,99 @@
             Cancel
           </ion-button>
         </ion-list>
+        <ion-list data-testid="link-options">
+          <ion-list-header>Share via link</ion-list-header>
+          <ion-item>
+            <ion-select
+              v-model="linkExpiry"
+              label="Expires"
+              interface="popover"
+              data-testid="link-expiry"
+            >
+              <ion-select-option
+                v-for="opt in LINK_EXPIRY_OPTIONS"
+                :key="opt.label"
+                :value="opt.label"
+              >
+                {{ opt.label }}
+              </ion-select-option>
+            </ion-select>
+          </ion-item>
+          <ion-button
+            expand="block"
+            fill="outline"
+            :disabled="busy"
+            data-testid="create-link"
+            @click="createLink"
+          >
+            Create link
+          </ion-button>
+          <ion-item
+            v-if="newLinkUrl"
+            data-testid="new-link"
+          >
+            <ion-label class="ion-text-wrap">
+              <p data-testid="new-link-url">{{ newLinkUrl }}</p>
+            </ion-label>
+            <ion-button
+              slot="end"
+              fill="clear"
+              data-testid="copy-link"
+              @click="copyLink"
+            >
+              Copy
+            </ion-button>
+          </ion-item>
+          <div
+            v-for="l in links"
+            :key="l.id"
+            data-testid="share-link"
+          >
+            <ion-item>
+              <ion-label class="ion-text-wrap">
+                <h3 data-testid="link-status">
+                  {{ linkStatus(l) }}
+                </h3>
+                <p>Opened by {{ l.openers.length }} {{ l.openers.length === 1 ? 'person' : 'people' }}</p>
+              </ion-label>
+              <ion-button
+                v-if="!l.disabled"
+                slot="end"
+                fill="clear"
+                color="danger"
+                data-testid="disable-link"
+                @click="disableLink(l.id)"
+              >
+                Disable
+              </ion-button>
+            </ion-item>
+            <ion-item
+              v-for="op in l.openers"
+              :key="op.user.id"
+              lines="none"
+              data-testid="link-opener"
+            >
+              <ion-label>{{ userLabel(op.user) }}</ion-label>
+              <ion-note
+                v-if="op.revoked"
+                slot="end"
+                data-testid="opener-removed"
+              >
+                Removed
+              </ion-note>
+              <ion-button
+                v-else-if="!l.disabled"
+                slot="end"
+                fill="clear"
+                color="danger"
+                data-testid="remove-opener"
+                @click="removeOpener(l.id, op.user.id)"
+              >
+                Remove
+              </ion-button>
+            </ion-item>
+          </div>
+        </ion-list>
             </ion-content>
         </ion-modal>
         <ion-toast
@@ -190,7 +283,10 @@
                 :key="s.id"
                 data-testid="shared-with-item"
               >
-                <ion-label>{{ userLabel(s.user) }}</ion-label>
+                <ion-label>
+                  {{ userLabel(s.user) }}
+                  <ion-note v-if="s.viaLink">via link</ion-note>
+                </ion-label>
                 <ion-button
                   slot="end"
                   fill="clear"
@@ -277,6 +373,8 @@ import {
   IonModal,
   IonAccordion,
   IonAccordionGroup,
+  IonSelect,
+  IonSelectOption,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import {shareOutline, trashOutline} from 'ionicons/icons';
@@ -292,12 +390,18 @@ import {
 } from '@/services/restaurants';
 import { fetchFriendships, userLabel, type Friendship } from '@/services/friends';
 import {
+  LINK_EXPIRY_OPTIONS,
   OFFLINE_SHARE_MESSAGE,
+  createShareLink,
+  disableShareLink,
   fetchOrderShares,
+  fetchShareLinks,
+  removeLinkOpener,
   isOffline,
   shareOrder,
   unshareOrder,
   type OrderShare,
+  type ShareLink,
 } from '@/services/sharing';
 
 const props = defineProps<{ id?: string; orderId?: string }>();
@@ -320,6 +424,9 @@ const picking = ref(false);
 const friends = ref<Friendship[]>([]);
 const shares = ref<OrderShare[]>([]);
 const selected = ref<string[]>([]);
+const links = ref<ShareLink[]>([]);
+const linkExpiry = ref(LINK_EXPIRY_OPTIONS[1].label);
+const newLinkUrl = ref('');
 /** Collapsed by default; the accordion's own chevron shows open or closed. */
 const sharedOpen = ref(false);
 const toast = reactive({ open: false, message: '', color: 'success' as 'success' | 'warning' | 'danger' });
@@ -331,6 +438,64 @@ async function loadShares() {
     shares.value = await fetchOrderShares(orderId);
   } catch {
     // The share list is secondary; keep showing what was loaded before.
+  }
+}
+
+async function loadLinks() {
+  try {
+    links.value = await fetchShareLinks(orderId);
+  } catch {
+    // Secondary, like the share list.
+  }
+}
+
+function linkStatus(l: ShareLink): string {
+  if (l.disabled) return 'Disabled link';
+  if (!l.active) return 'Expired link';
+  return l.expiresAt ? `Link expires ${new Date(l.expiresAt).toLocaleString()}` : 'Link with no expiry';
+}
+
+async function createLink() {
+  busy.value = true;
+  try {
+    const hours = LINK_EXPIRY_OPTIONS.find((o) => o.label === linkExpiry.value)?.hours ?? null;
+    const link = await createShareLink(orderId, hours);
+    newLinkUrl.value = link.url ?? '';
+    showToast('Share link created', 'success');
+    await loadLinks();
+  } catch (e) {
+    showToast(errorText(e, 'Could not create link'), isOffline() ? 'warning' : 'danger');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(newLinkUrl.value);
+    showToast('Link copied', 'success');
+  } catch {
+    showToast('Could not copy the link', 'danger');
+  }
+}
+
+async function disableLink(linkId: string) {
+  try {
+    await disableShareLink(linkId);
+    showToast('Link disabled', 'success');
+    await Promise.all([loadLinks(), loadShares()]);
+  } catch (e) {
+    showToast(errorText(e, 'Could not disable link'), 'danger');
+  }
+}
+
+async function removeOpener(linkId: string, userId: string) {
+  try {
+    await removeLinkOpener(linkId, userId);
+    showToast('Access removed', 'success');
+    await Promise.all([loadLinks(), loadShares()]);
+  } catch (e) {
+    showToast(errorText(e, 'Could not remove access'), 'danger');
   }
 }
 
@@ -370,8 +535,9 @@ async function share() {
   try {
     const all = (await fetchFriendships()) ?? [];
     friends.value = all.filter((f) => f.status === 'accepted');
-    await loadShares();
+    await Promise.all([loadShares(), loadLinks()]);
     selected.value = [];
+    newLinkUrl.value = '';
     picking.value = true;
   } catch (e) {
     showToast(errorText(e, 'Could not load friends'), 'danger');
@@ -450,6 +616,7 @@ load();
 
 defineExpose({
   order, load, makeDefault, remove, share, confirmShare, unshare, toggle, selected, picking, toast, sharedOpen,
+  links, linkExpiry, newLinkUrl, createLink, disableLink, removeOpener,
   confirmingDelete, deleteAlertButtons,
 });
 </script>
