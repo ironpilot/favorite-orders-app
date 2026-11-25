@@ -15,7 +15,7 @@ The Restaurant List is the main screen users see after opening the app or signin
 ### Functional Requirements
 1. **View restaurants:** The user can see a list of the restaurants where they have recorded favorite orders.
 2. **Landing screen:** After opening the app (signed in) or completing sign-up, the user lands on the restaurant list.
-3. **Restaurant entry:** Each restaurant in the list shows its name, its order count, and the items of its default order as the key-items preview.
+3. **Restaurant entry:** Each restaurant in the list shows its name, its order count, and the items of its default order as the key-items preview. A "Shared" pill appears on a restaurant if any order beneath it is shared, and no pill otherwise.
 4. **Select a restaurant:** The user can select a restaurant to see the orders recorded at it.
 5. **Add order entry point:** The list provides a prominent "add order" action that starts the flow for adding a favorite order.
 6. **Manual restaurants:** A restaurant appears in the list because the user entered it manually, by creating it at the time an order is added or by picking it again later, or because they saved an order at an administrator-owned restaurant. When adding an order, the user can pick an existing restaurant (administrator-owned or their own, via auto-fill) or create a new one. Each restaurant holds multiple orders; each order has its own items (quantity default 1) with per-item customizations (remove, add, substitute), and editing an order does not change the restaurant. There is no external restaurant lookup.

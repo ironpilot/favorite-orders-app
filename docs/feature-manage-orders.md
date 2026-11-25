@@ -53,7 +53,7 @@ Manage Favorite Orders lets users record, update and remove the favorite orders 
 ### Dependencies
 - **Account Creation and Sign Up:** orders are saved under the signed-in user's own account.
 - **Restaurant List:** shows the restaurants created here, the order count, and the default order's items, and is the starting point for adding an order and opening a restaurant.
-- **Share an Order with Another User:** uses the share action on the order detail view. Only accepted friends can receive a shared order.
+- **Share an Order with Another User:** uses the share action on the order detail view. Only accepted friends can receive a shared order. The detail view shows a collapsible "Shared with" list with a count pill, the order list shows a "Shared" pill on shared orders, and sharing status messages are temporary toasts.
 - **Text an Order:** uses the text button on the order detail view.
 - **Browse Shared Orders:** shared orders appear there, not among the user's own orders. The Shared list also gets pull-to-refresh; that is owned by the Browse Shared Orders feature. The same applies to any other list page, such as the friends list.
 

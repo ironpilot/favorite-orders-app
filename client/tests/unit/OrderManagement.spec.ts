@@ -69,7 +69,7 @@ import RestaurantOrdersPage from '@/views/RestaurantOrdersPage.vue';
 import OrderDetailPage from '@/views/OrderDetailPage.vue';
 import AddOrderPage from '@/views/AddOrderPage.vue';
 import { buildRouter } from '@/router';
-import { shareHandler, updateOrder } from '@/services/restaurants';
+import { updateOrder } from '@/services/restaurants';
 
 function order(id: string, extra: Partial<TestOrder> = {}): TestOrder {
   return {
@@ -242,13 +242,12 @@ describe('OrderDetailPage', () => {
     expect(wrapper.find('[data-testid="detail-name"]').exists()).toBe(false);
   });
 
-  it('has a share action that calls the share hook', async () => {
+  it('has a share action that opens the friend picker', async () => {
     state.orders = [order('o1')];
-    const spy = vi.spyOn(shareHandler, 'share');
     const { wrapper } = await mountDetail();
     await wrapper.find('[data-testid="share-order"]').trigger('click');
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }));
-    spy.mockRestore();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="friend-picker"]').exists()).toBe(true);
   });
 
   it('makes the order the default', async () => {

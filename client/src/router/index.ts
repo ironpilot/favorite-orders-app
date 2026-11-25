@@ -21,6 +21,7 @@ export const routes: RouteRecordRaw[] = [
       { path: 'restaurants/:id/orders/:orderId', component: () => import('@/views/OrderDetailPage.vue'), props: true },
       { path: 'restaurants/:id/orders/:orderId/edit', component: () => import('@/views/AddOrderPage.vue') },
       { path: 'shared', component: () => import('@/views/SharedOrdersPage.vue') },
+      { path: 'shared/:shareId', component: () => import('@/views/SharedOrderDetailPage.vue'), props: true },
       { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
       { path: 'friends', component: () => import('@/views/FriendsPage.vue') },
     ],

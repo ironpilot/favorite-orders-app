@@ -35,6 +35,11 @@ Friends and Sharing lets users connect with friends and family through friend re
 - A shared order is read-only for the recipient and always shows the owner's latest version; if the owner edits it, the recipient sees the update, and if the owner deletes it, it disappears from the recipient's Shared tab.
 - A recipient can save a shared order to their own orders. The copy goes under a restaurant matched by name from the recipient's available restaurants, or a new user-created restaurant if none matches. The saved copy is independent of the original.
 - Sharing requires a network connection.
+- Sharing status messages (shared, unshared, saved, offline, and errors) are temporary `ion-toast` messages, not inline text. For example, a successful share shows a success toast "Shared with X Friend(s)"; offline and error outcomes use warning or danger colors.
+- On the order detail view, the "Shared with" section is a collapsible list (`ion-accordion`), collapsed by default. Its header shows the label, a pill with the number of friends the order is shared with, and a chevron indicating open or closed. Expanding it shows the friends and their Unshare buttons.
+- The order list shows a "Shared" pill on an order that is shared with anyone, and no pill otherwise.
+- The restaurant list shows a "Shared" pill on a restaurant if any order beneath it is shared, and no pill otherwise.
+- The pills update after sharing or unsharing.
 
 ### Sharing via link
 - The owner can generate a share link for an order from the share action, and chooses an expiry (or no expiry) when generating it.
@@ -87,6 +92,8 @@ Friends and Sharing lets users connect with friends and family through friend re
 - Notifications are push, for received orders and friend requests/acceptances.
 - Saving a shared order matches or creates a restaurant by name.
 - Multiple friends can be selected when sharing; duplicates are prevented.
+- Sharing status messages are temporary toasts (success, warning, danger), not inline text.
+- "Shared with" on order detail is a collapsible list with a count pill and chevron; order and restaurant lists show a "Shared" pill or nothing. Shared tab badges and link-share pills are out of scope for now.
 - Share links: owner-chosen expiry, reusable by anyone signed in, openers can save, store/PWA fallback, owner can disable the link or remove individual openers, unfriending revokes access.
 
 ## Implementation Steps
@@ -119,6 +126,7 @@ Make direct sharing usable.
 - Shared tab listing orders by restaurant or person, with a read-only detail view.
 - Recipients always see the owner's latest version; deleted orders disappear.
 - Pull-to-refresh and reload on entry for the Shared list; sharing requires a connection.
+- Share outcomes appear as temporary `ion-toast` messages: a success toast "Shared with N Friend(s)" after sharing, and a warning toast when blocked while offline (danger on errors).
 
 Done when a user can share an order with friends and they can view it in their Shared tab.
 
@@ -129,12 +137,15 @@ Done when a user can share an order with friends and they can view it in their S
 - The shared detail view is read-only.
 - Owner edits show up for the recipient; deleting the order removes it from the Shared tab.
 - Unshared orders stay private to the owner.
-- Sharing is blocked with a message while offline.
+- Sharing shows a success toast "Shared with N Friend(s)" (N is the number of friends selected), and the toast disappears on its own.
+- Sharing is blocked with a warning toast while offline.
 - Shared list supports pull-to-refresh and reloads on entry.
 
 ### Step 3: Save copies and manage access
 - Recipients can save a shared order to their own orders (restaurant matched by name, otherwise a new user-created one); the copy is independent.
-- Owners can see who an order is shared with and unshare it from a friend.
+- On the order detail view, the "Shared with" section is a collapsible panel (`ion-accordion`, collapsed by default) whose header shows the label, a count pill, and a chevron; expanding it lists the friends with Unshare buttons.
+- Unshare and save outcomes appear as temporary toasts (success, or danger on errors).
+- The order list shows a "Shared" pill on orders shared with anyone, and the restaurant list shows a "Shared" pill on restaurants with any shared order; otherwise no pill. Pills update after sharing or unsharing.
 - Removing a friend revokes their access to shared orders; saved copies remain.
 
 Done when the full friend-share lifecycle (share, save, unshare, unfriend) works.
@@ -143,8 +154,13 @@ Done when the full friend-share lifecycle (share, save, unshare, unfriend) works
 - Saving a shared order under a matching restaurant name uses the existing restaurant.
 - Saving with no match creates a new user-created restaurant.
 - The saved copy is independent of later owner edits or deletion.
-- The owner sees who an order is shared with.
-- Unsharing removes the order from that friend's Shared tab.
+- The "Shared with" panel is collapsed by default; its header shows the friend count pill and a chevron that reflects open or closed.
+- Expanding the panel shows the friends the order is shared with, each with an Unshare button.
+- Unsharing removes the order from that friend's Shared tab, updates the count pill, and shows a success toast.
+- Saving a shared order shows a success toast; failures show a danger toast.
+- The order list shows a "Shared" pill on a shared order and no pill on an unshared order.
+- The restaurant list shows a "Shared" pill when any order beneath it is shared, and no pill otherwise.
+- The pills clear after the last friend is unshared.
 - Unfriending removes shared orders from the ex-friend's Shared tab; saved copies remain.
 
 ### Step 4: Push notifications
@@ -213,8 +229,8 @@ Status values: Not started, In progress, In review, Done, Blocked.
 | Step | Title | Status | Tests passing | Notes |
 |------|-------|--------|---------------|-------|
 | 1 | Friends | In review | Yes | Friends is a primary tab (`/tabs/friends`); search is exact email/phone only (2026-11-24) |
-| 2 | Share an order with friends and browse the Shared tab | Not started | No | |
-| 3 | Save copies and manage access | Not started | No | |
+| 2 | Share an order with friends and browse the Shared tab | In progress | No | Multi-select friend picker on order detail; Shared tab (`/tabs/shared`) groups by restaurant or person, read-only detail at `/tabs/shared/:shareId` (2026-11-25); pending: share/offline toasts instead of inline messages |
+| 3 | Save copies and manage access | In progress | No | Save copy matches the recipient's own then admin restaurant by exact name, else creates one; "Shared with" list with Unshare; unfriending removes shares both ways (2026-11-25); pending: collapsible "Shared with" panel with count pill, unshare/save toasts, "Shared" pills on order and restaurant lists |
 | 4 | Push notifications | Not started | No | |
 | 5 | Share links (core) | Not started | No | |
 | 6 | Share link friend flow and access control | Not started | No | |

@@ -154,11 +154,6 @@ export async function deleteOrder(id: string): Promise<void> {
   await api<void>('DELETE', `/api/orders/${encodeURIComponent(id)}`);
 }
 
-/** Hook for the Share an Order feature; replaced when that feature is built. */
-export const shareHandler: { share: (order: Order) => void | Promise<void> } = {
-  share: () => undefined,
-};
-
 /** Saves an order; the restaurant is created if no restaurant with this exact name exists yet. */
 export function saveOrder(order: NewOrder): Promise<Order> {
   return api<Order>('POST', '/api/orders', order);

@@ -729,25 +729,83 @@ export function createApp(db, options = {}) {
       return [200, { id: f.id, status: 'accepted' }];
     }],
 
-    // Declines (silent), cancels a pending request, or removes a friend.
+    // Declines (silent), cancels a pending request, or removes a friend. Removing a friend revokes
+    // the orders the two shared with each other; copies already saved are independent and remain.
     ['DELETE', '/api/friends/:id', ({ user, params }) => {
-      const res = run('delete from friendships where id = ? and ? in (requester_id, addressee_id)', params.id, user.id);
-      if (res.changes === 0) throw new HttpError(404, 'Friendship not found');
+      const f = one('select * from friendships where id = ? and ? in (requester_id, addressee_id)', params.id, user.id);
+      if (!f) throw new HttpError(404, 'Friendship not found');
+      withTransaction(() => {
+        run('delete from friendships where id = ?', f.id);
+        run(
+          `delete from order_shares where (shared_by = ? and shared_with = ?) or (shared_by = ? and shared_with = ?)`,
+          f.requester_id, f.addressee_id, f.addressee_id, f.requester_id,
+        );
+      });
       return [204];
     }],
 
     // Shares ------------------------------------------------------------------
+    // Shares an order with one friend ({ userId }) or several ({ userIds }). Only accepted friends
+    // qualify, and an order cannot be shared twice with the same friend.
     ['POST', '/api/orders/:id/shares', ({ user, params, body }) => {
       ownOrder(user.id, params.id);
-      const friendId = String(body.userId ?? '');
-      if (!areFriends(user.id, friendId)) throw new HttpError(403, 'Orders can only be shared with accepted friends');
-      const id = randomUUID();
-      try {
-        run('insert into order_shares (id, order_id, shared_by, shared_with) values (?, ?, ?, ?)', id, params.id, user.id, friendId);
-      } catch {
-        throw new HttpError(409, 'Order already shared with this user');
+      const many = Array.isArray(body.userIds);
+      const friendIds = [...new Set((many ? body.userIds : [body.userId]).map((v) => String(v ?? '')))];
+      if (friendIds.length === 0) throw new HttpError(400, 'Select at least one friend');
+      for (const friendId of friendIds) {
+        if (!areFriends(user.id, friendId)) throw new HttpError(403, 'Orders can only be shared with accepted friends');
+        if (one('select 1 from order_shares where order_id = ? and shared_with = ?', params.id, friendId)) {
+          throw new HttpError(409, 'Order already shared with this user');
+        }
       }
-      return [201, { id, orderId: params.id, sharedWith: friendId }];
+      const created = withTransaction(() => friendIds.map((friendId) => {
+        const id = randomUUID();
+        run('insert into order_shares (id, order_id, shared_by, shared_with) values (?, ?, ?, ?)', id, params.id, user.id, friendId);
+        return { id, orderId: params.id, sharedWith: friendId };
+      }));
+      return [201, many ? created : created[0]];
+    }],
+
+    // The owner sees who an order is shared with.
+    ['GET', '/api/orders/:id/shares', ({ user, params }) => {
+      ownOrder(user.id, params.id);
+      const rows = all(
+        `select s.id as share_id, s.created_at as shared_at, u.id as uid, u.email, u.phone, u.display_name
+           from order_shares s join users u on u.id = s.shared_with
+          where s.order_id = ? order by s.created_at`,
+        params.id,
+      );
+      return [200, rows.map((r) => ({
+        id: r.share_id,
+        sharedAt: r.shared_at,
+        user: publicUser({ id: r.uid, email: r.email, phone: r.phone, display_name: r.display_name }),
+      }))];
+    }],
+
+    // Saves an independent copy of a shared order. The copy goes under a restaurant the recipient can
+    // see with the same name (their own first, then administrator-owned), or a new user-created one.
+    ['POST', '/api/shared/:id/save', ({ user, params }) => {
+      const s = one(
+        `select s.order_id, r.name as restaurant_name from order_shares s
+           join orders o on o.id = s.order_id join restaurants r on r.id = o.restaurant_id
+          where s.id = ? and s.shared_with = ?`,
+        params.id, user.id,
+      );
+      if (!s) throw new HttpError(404, 'Shared order not found');
+      const source = orderById(s.order_id);
+      const order = withTransaction(() => {
+        let r = one(
+          `select id from restaurants where (owner_id = ? or owner_id is null) and name = ?
+            order by owner_id is null limit 1`,
+          user.id, s.restaurant_name,
+        );
+        if (!r) {
+          r = { id: randomUUID() };
+          run('insert into restaurants (id, owner_id, name) values (?, ?, ?)', r.id, user.id, s.restaurant_name);
+        }
+        return insertOrder(user.id, r.id, { title: source.title, notes: source.notes, items: source.items }, false);
+      });
+      return [201, order];
     }],
 
     ['GET', '/api/shared', ({ user }) => {

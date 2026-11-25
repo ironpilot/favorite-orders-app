@@ -690,6 +690,102 @@ describe('friends and sharing', () => {
     assert.equal((await call('PATCH', `/api/orders/${o.id}`, { token: b.token, body: { notes: 'x' } })).status, 404);
     assert.deepEqual((await call('GET', '/api/restaurants', { token: b.token })).data, []);
   });
+
+  async function befriend(a, b) {
+    const req = (await call('POST', '/api/friends', { token: a.token, body: { userId: b.user.id } })).data;
+    await call('POST', `/api/friends/${req.id}/accept`, { token: b.token });
+    return req.id;
+  }
+  const sharedList = async (token) => (await call('GET', '/api/shared', { token })).data;
+
+  it('shares with several friends at once and prevents duplicates', async () => {
+    const a = await signUp('multi-a@example.com');
+    const b = await signUp('multi-b@example.com');
+    const c = await signUp('multi-c@example.com');
+    const stranger = await signUp('multi-d@example.com');
+    await befriend(a, b);
+    await befriend(c, a);
+    const o = await saveOrder(a.token, 'Multi', { items: ['Tea'] });
+    const share = (userIds) => call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userIds } });
+    assert.equal((await share([b.user.id, stranger.user.id])).status, 403);
+    assert.deepEqual(await sharedList(b.token), []);
+    const res = await share([b.user.id, c.user.id]);
+    assert.equal(res.status, 201);
+    assert.equal(res.data.length, 2);
+    assert.equal((await share([b.user.id])).status, 409);
+    assert.equal((await sharedList(b.token))[0].sharedBy.id, a.user.id);
+    assert.equal((await sharedList(c.token))[0].order.id, o.id);
+    assert.deepEqual(await sharedList(stranger.token), []);
+
+    const shares = (await call('GET', `/api/orders/${o.id}/shares`, { token: a.token })).data;
+    assert.deepEqual(shares.map((s) => s.user.id).sort(), [b.user.id, c.user.id].sort());
+    assert.equal((await call('GET', `/api/orders/${o.id}/shares`, { token: b.token })).status, 404);
+  });
+
+  it('shows the owner latest version and removes deleted or unshared orders', async () => {
+    const a = await signUp('live-a@example.com');
+    const b = await signUp('live-b@example.com');
+    await befriend(a, b);
+    const o = await saveOrder(a.token, 'Live', { items: ['Old'] });
+    const shareId = (await call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } })).data.id;
+    await call('PATCH', `/api/orders/${o.id}`, { token: a.token, body: { items: items('New') } });
+    assert.equal((await sharedList(b.token))[0].order.items[0].name, 'New');
+
+    assert.equal((await call('DELETE', `/api/shares/${shareId}`, { token: a.token })).status, 204);
+    assert.deepEqual(await sharedList(b.token), []);
+    await call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } });
+    await call('DELETE', `/api/orders/${o.id}`, { token: a.token });
+    assert.deepEqual(await sharedList(b.token), []);
+  });
+
+  it('saves an independent copy under a matching or new restaurant', async () => {
+    const a = await signUp('save-a@example.com');
+    const b = await signUp('save-b@example.com');
+    await befriend(a, b);
+    const mine = await saveOrder(b.token, 'Diner', { items: ['Pie'] });
+    const o1 = await saveOrder(a.token, 'Diner', { title: 'Lunch', items: [{ name: 'Burger', quantity: 2 }], notes: 'n' });
+    const o2 = await saveOrder(a.token, 'Brand New Place', { items: ['Soup'] });
+    await call('POST', `/api/orders/${o1.id}/shares`, { token: a.token, body: { userId: b.user.id } });
+    await call('POST', `/api/orders/${o2.id}/shares`, { token: a.token, body: { userId: b.user.id } });
+    const list = await sharedList(b.token);
+    const shareOf = (id) => list.find((s) => s.order.id === id).shareId;
+
+    const copy1 = await call('POST', `/api/shared/${shareOf(o1.id)}/save`, { token: b.token });
+    assert.equal(copy1.status, 201);
+    assert.equal(copy1.data.restaurantId, mine.restaurantId);
+    assert.equal(copy1.data.ownerId, b.user.id);
+    assert.equal(copy1.data.title, 'Lunch');
+    assert.equal(copy1.data.items[0].quantity, 2);
+
+    const copy2 = (await call('POST', `/api/shared/${shareOf(o2.id)}/save`, { token: b.token })).data;
+    const restaurant = (await call('GET', `/api/restaurants/${copy2.restaurantId}`, { token: b.token })).data;
+    assert.equal(restaurant.name, 'Brand New Place');
+    assert.equal(restaurant.adminOwned, false);
+    assert.notEqual(copy2.restaurantId, o2.restaurantId);
+
+    await call('PATCH', `/api/orders/${o1.id}`, { token: a.token, body: { items: items('Changed') } });
+    await call('DELETE', `/api/orders/${o2.id}`, { token: a.token });
+    assert.equal((await call('GET', `/api/orders/${copy1.data.id}`, { token: b.token })).data.items[0].name, 'Burger');
+    assert.equal((await call('GET', `/api/orders/${copy2.id}`, { token: b.token })).status, 200);
+    assert.equal((await call('POST', `/api/shared/${shareOf(o1.id)}/save`, { token: a.token })).status, 404);
+  });
+
+  it('unfriending revokes shared orders but keeps saved copies', async () => {
+    const a = await signUp('unf-a@example.com');
+    const b = await signUp('unf-b@example.com');
+    const friendshipId = await befriend(a, b);
+    const o = await saveOrder(a.token, 'Unf', { items: ['Wrap'] });
+    const back = await saveOrder(b.token, 'Back', { items: ['Taco'] });
+    await call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } });
+    await call('POST', `/api/orders/${back.id}/shares`, { token: b.token, body: { userId: a.user.id } });
+    const copy = (await call('POST', `/api/shared/${(await sharedList(b.token))[0].shareId}/save`, { token: b.token })).data;
+
+    assert.equal((await call('DELETE', `/api/friends/${friendshipId}`, { token: a.token })).status, 204);
+    assert.deepEqual(await sharedList(b.token), []);
+    assert.deepEqual(await sharedList(a.token), []);
+    assert.equal((await call('GET', `/api/orders/${o.id}`, { token: b.token })).status, 404);
+    assert.equal((await call('GET', `/api/orders/${copy.id}`, { token: b.token })).status, 200);
+  });
 });
 
 describe('friends', () => {

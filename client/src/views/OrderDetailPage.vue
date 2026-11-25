@@ -82,6 +82,85 @@
           />
           Share
         </ion-button>
+        <ion-list
+          v-if="picking"
+          data-testid="friend-picker"
+        >
+          <ion-list-header>Share with friends</ion-list-header>
+          <p
+            v-if="friends.length === 0"
+            data-testid="picker-empty"
+          >
+            Add friends in the Friends tab to share orders.
+          </p>
+          <ion-item
+            v-for="f in friends"
+            :key="f.user.id"
+            data-testid="picker-friend"
+          >
+            <ion-checkbox
+              :checked="alreadyShared(f.user.id) || selected.includes(f.user.id)"
+              :disabled="alreadyShared(f.user.id)"
+              data-testid="picker-checkbox"
+              @ion-change="toggle(f.user.id)"
+            >
+              {{ userLabel(f.user) }}
+            </ion-checkbox>
+            <ion-note
+              v-if="alreadyShared(f.user.id)"
+              slot="end"
+              data-testid="picker-already-shared"
+            >
+              Shared
+            </ion-note>
+          </ion-item>
+          <ion-button
+            expand="block"
+            :disabled="busy || selected.length === 0"
+            data-testid="confirm-share"
+            @click="confirmShare"
+          >
+            Share with {{ selected.length }} {{ selected.length === 1 ? 'friend' : 'friends' }}
+          </ion-button>
+          <ion-button
+            expand="block"
+            fill="clear"
+            data-testid="cancel-share"
+            @click="picking = false"
+          >
+            Cancel
+          </ion-button>
+        </ion-list>
+        <p
+          v-if="shareMessage"
+          data-testid="share-message"
+        >
+          <ion-text :color="shareError ? 'danger' : 'success'">
+            {{ shareMessage }}
+          </ion-text>
+        </p>
+        <ion-list
+          v-if="shares.length > 0"
+          data-testid="shared-with"
+        >
+          <ion-list-header>Shared with</ion-list-header>
+          <ion-item
+            v-for="s in shares"
+            :key="s.id"
+            data-testid="shared-with-item"
+          >
+            <ion-label>{{ userLabel(s.user) }}</ion-label>
+            <ion-button
+              slot="end"
+              fill="clear"
+              color="danger"
+              data-testid="unshare"
+              @click="unshare(s.id)"
+            >
+              Unshare
+            </ion-button>
+          </ion-item>
+        </ion-list>
         <ion-button
           size="small"
           expand="block"
@@ -147,6 +226,9 @@ import {
   IonButton,
   IonIcon,
   IonAlert,
+  IonListHeader,
+  IonCheckbox,
+  IonNote,
   onIonViewWillEnter,
 } from '@ionic/vue';
 import {shareOutline, trashOutline} from 'ionicons/icons';
@@ -158,9 +240,17 @@ import {
   onOrderUpdated,
   orderLabel,
   setDefaultOrder,
-  shareHandler,
   type Order,
 } from '@/services/restaurants';
+import { fetchFriendships, userLabel, type Friendship } from '@/services/friends';
+import {
+  OFFLINE_SHARE_MESSAGE,
+  fetchOrderShares,
+  isOffline,
+  shareOrder,
+  unshareOrder,
+  type OrderShare,
+} from '@/services/sharing';
 
 const props = defineProps<{ id?: string; orderId?: string }>();
 const route = useRoute();
@@ -178,10 +268,28 @@ const deleteAlertButtons = [
   { text: 'Remove', role: 'destructive', handler: () => { remove(); } },
 ];
 
+const picking = ref(false);
+const friends = ref<Friendship[]>([]);
+const shares = ref<OrderShare[]>([]);
+const selected = ref<string[]>([]);
+const shareMessage = ref('');
+const shareError = ref(false);
+
+const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+
+async function loadShares() {
+  try {
+    shares.value = await fetchOrderShares(orderId);
+  } catch {
+    // The share list is secondary; keep showing what was loaded before.
+  }
+}
+
 async function load() {
   errorMessage.value = '';
   try {
     order.value = await fetchOrder(orderId);
+    await loadShares();
   } catch (e) {
     errorMessage.value = e instanceof Error ? e.message : 'Could not load order';
   } finally {
@@ -189,8 +297,62 @@ async function load() {
   }
 }
 
+function setShareMessage(message: string, error: boolean) {
+  shareMessage.value = message;
+  shareError.value = error;
+}
+
+const alreadyShared = (userId: string) => shares.value.some((s) => s.user.id === userId);
+
+function toggle(userId: string) {
+  if (alreadyShared(userId)) return;
+  selected.value = selected.value.includes(userId)
+    ? selected.value.filter((id) => id !== userId)
+    : [...selected.value, userId];
+}
+
+/** Opens the friend picker; only accepted friends are listed. Sharing needs a connection. */
 async function share() {
-  if (order.value) await shareHandler.share(order.value);
+  setShareMessage('', false);
+  if (isOffline()) {
+    setShareMessage(OFFLINE_SHARE_MESSAGE, true);
+    return;
+  }
+  try {
+    const all = (await fetchFriendships()) ?? [];
+    friends.value = all.filter((f) => f.status === 'accepted');
+    await loadShares();
+    selected.value = [];
+    picking.value = true;
+  } catch (e) {
+    setShareMessage(errorText(e, 'Could not load friends'), true);
+  }
+}
+
+async function confirmShare() {
+  busy.value = true;
+  try {
+    const count = selected.value.length;
+    await shareOrder(orderId, selected.value);
+    picking.value = false;
+    selected.value = [];
+    setShareMessage(`Shared with ${count} ${count === 1 ? 'friend' : 'friends'}`, false);
+    await loadShares();
+  } catch (e) {
+    setShareMessage(errorText(e, 'Could not share order'), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function unshare(shareId: string) {
+  setShareMessage('', false);
+  try {
+    await unshareOrder(shareId);
+    shares.value = shares.value.filter((s) => s.id !== shareId);
+  } catch (e) {
+    setShareMessage(errorText(e, 'Could not unshare order'), true);
+  }
 }
 
 function edit() {
@@ -232,7 +394,10 @@ onUnmounted(stopListening);
 onIonViewWillEnter(load);
 load();
 
-defineExpose({ order, load, makeDefault, remove, share, confirmingDelete, deleteAlertButtons });
+defineExpose({
+  order, load, makeDefault, remove, share, confirmShare, unshare, toggle, selected, picking,
+  confirmingDelete, deleteAlertButtons,
+});
 </script>
 
 <style scoped>
