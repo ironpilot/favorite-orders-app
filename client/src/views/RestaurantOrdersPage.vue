@@ -56,9 +56,26 @@
           @click="openOrder(order)"
         >
           <ion-label class="ion-text-wrap">
-            <h2 data-testid="order-label">
-              {{ orderLabel(order) }}
-            </h2>
+            <div class="item-header">
+              <h2 data-testid="order-label">
+                {{ orderLabel(order) }}
+              </h2>
+              <span class="item-pills">
+                <ion-badge
+                  v-if="order.shared"
+                  color="tertiary"
+                  data-testid="shared-pill"
+                >
+                  Shared
+                </ion-badge>
+                <ion-badge
+                  v-if="order.isDefault"
+                  data-testid="default-badge"
+                >
+                  Default
+                </ion-badge>
+              </span>
+            </div>
             <p data-testid="order-items">
               {{ order.items.map(formatItem).join(', ') }}
             </p>
@@ -66,23 +83,8 @@
               {{ order.notes }}
             </p>
           </ion-label>
-          <ion-badge
-            v-if="order.shared"
-            slot="end"
-            color="tertiary"
-            data-testid="shared-pill"
-          >
-            Shared
-          </ion-badge>
-          <ion-badge
-            v-if="order.isDefault"
-            slot="end"
-            data-testid="default-badge"
-          >
-            Default
-          </ion-badge>
           <ion-button
-            v-else
+            v-if="!order.isDefault"
             slot="end"
             fill="clear"
             size="small"
@@ -214,6 +216,23 @@ defineExpose({ orders, load, onRefresh, makeDefault });
 </script>
 
 <style scoped>
+.item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.item-header h2 {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-pills {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
 .hint {
   font-size: 0.85rem;
   color: var(--ion-color-medium);

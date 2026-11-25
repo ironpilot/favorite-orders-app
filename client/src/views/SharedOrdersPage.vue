@@ -12,10 +12,10 @@
           @ion-change="grouping = ($event.detail.value as SharedGrouping)"
         >
           <ion-segment-button value="restaurant">
-            <ion-label>By restaurant</ion-label>
+            <ion-label>By Restaurant</ion-label>
           </ion-segment-button>
           <ion-segment-button value="person">
-            <ion-label>By person</ion-label>
+            <ion-label>By Person</ion-label>
           </ion-segment-button>
         </ion-segment>
       </ion-toolbar>

@@ -68,6 +68,7 @@
           {{ shared.order.notes }}
         </p>
         <ion-button
+            size="small"
           expand="block"
           :disabled="busy"
           data-testid="save-copy"

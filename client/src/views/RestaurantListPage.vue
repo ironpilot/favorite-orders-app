@@ -90,13 +90,30 @@
           @click="openRestaurant(restaurant.id)"
         >
           <ion-label class="ion-text-wrap restaurant-label">
-            <h2
-              class="restaurant-name"
-              :title="restaurant.name"
-              data-testid="restaurant-name"
-            >
-              {{ restaurant.name }}
-            </h2>
+            <div class="item-header">
+              <h2
+                class="restaurant-name"
+                :title="restaurant.name"
+                data-testid="restaurant-name"
+              >
+                {{ restaurant.name }}
+              </h2>
+              <span class="item-pills">
+                <ion-badge
+                  v-if="restaurant.shared"
+                  color="tertiary"
+                  data-testid="shared-pill"
+                >
+                  Shared
+                </ion-badge>
+                <ion-badge
+                  color="medium"
+                  data-testid="order-count"
+                >
+                  {{ restaurant.orderCount }} {{ restaurant.orderCount === 1 ? 'order' : 'orders' }}
+                </ion-badge>
+              </span>
+            </div>
             <p
               v-if="restaurant.defaultItems.length > 0"
               data-testid="key-items"
@@ -123,21 +140,6 @@
               </ion-button>
             </template>
           </ion-label>
-          <ion-badge
-            v-if="restaurant.shared"
-            slot="end"
-            color="tertiary"
-            data-testid="shared-pill"
-          >
-            Shared
-          </ion-badge>
-          <ion-badge
-            slot="end"
-            color="medium"
-            data-testid="order-count"
-          >
-            {{ restaurant.orderCount }} {{ restaurant.orderCount === 1 ? 'order' : 'orders' }}
-          </ion-badge>
         </ion-item>
       </ion-list>
       <ion-fab
@@ -266,6 +268,23 @@ defineExpose({ load, onRefresh, search, sort });
 </script>
 
 <style scoped>
+.item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.item-header h2 {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-pills {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
 .restaurant-label {
   min-width: 0;
 }
