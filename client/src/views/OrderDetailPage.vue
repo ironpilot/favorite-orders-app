@@ -214,6 +214,7 @@
           Edit
         </ion-button>
         <ion-button
+            size="small"
           v-if="!order.isDefault"
           expand="block"
           fill="outline"
