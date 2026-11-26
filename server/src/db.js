@@ -23,20 +23,23 @@ create table if not exists users (
 -- Phone is required at sign-up and unique per account (older rows may have no phone).
 create unique index if not exists users_phone_unique on users (phone) where phone is not null;
 
+-- Access tokens (expires_at in ms, 1 hour). Rows without an expiry predate access-token lifetimes and are rejected.
 create table if not exists sessions (
   token text primary key,
   user_id text not null references users (id) on delete cascade,
-  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  expires_at integer
 );
 
 -- Refresh tokens (stored hashed), 14 days, tied to the session they were issued with.
--- Revoked on sign-out and password reset. Rotation and POST /auth/refresh come with access tokens.
+-- Revoked on sign-out and password reset; rotated on each POST /api/auth/refresh (reuse is rejected).
 create table if not exists refresh_tokens (
   token_hash text primary key,
   user_id text not null references users (id) on delete cascade,
   session_token text not null,
   expires_at integer not null,
-  revoked integer not null default 0
+  revoked integer not null default 0,
+  rotated integer not null default 0
 );
 create index if not exists refresh_tokens_user_idx on refresh_tokens (user_id);
 
@@ -254,6 +257,14 @@ function migrateShareLinkColumn(db) {
   if (!columns.includes('link_id')) db.exec('alter table order_shares add column link_id text');
 }
 
+// Older databases had sessions without an access-token expiry.
+function migrateSessionExpiry(db) {
+  const columns = db.prepare('pragma table_info(sessions)').all().map((c) => c.name);
+  if (!columns.includes('expires_at')) db.exec('alter table sessions add column expires_at integer');
+  const refresh = db.prepare('pragma table_info(refresh_tokens)').all().map((c) => c.name);
+  if (!refresh.includes('rotated')) db.exec('alter table refresh_tokens add column rotated integer not null default 0');
+}
+
 // Older databases had no email verification; existing accounts are treated as already verified.
 function migrateEmailVerified(db) {
   const columns = db.prepare('pragma table_info(users)').all().map((c) => c.name);
@@ -327,6 +338,7 @@ export function openDatabase(path = ':memory:') {
   migrateEmailVerified(db);
   db.exec(SCHEMA);
   migrateShareLinkColumn(db);
+  migrateSessionExpiry(db);
   migrateLegacyOrders(db);
   runDataMigrations(db);
   return db;

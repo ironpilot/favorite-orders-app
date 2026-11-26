@@ -22,6 +22,8 @@ vi.mock('@/lib/api', () => {
     ApiError,
     getToken: () => (state.account ? 'token' : null),
     setToken: () => undefined,
+    getRefreshToken: () => null,
+    setRefreshToken: () => undefined,
     api: async (method: string, path: string, body?: unknown) => {
       state.calls.push([method, path, body]);
       if (path === '/api/auth/me') {

@@ -1,4 +1,9 @@
 import { api, ApiError, getRefreshToken, getToken, setRefreshToken, setToken } from '@/lib/api';
+import { setTokenExpiries } from '@/lib/tokens';
+import { cachedAccount, clearSession, isOnline, markAuthenticated, rememberAccount } from '@/services/session';
+
+/** Shown when an action needs the server but the device is offline. */
+export const CONNECTION_NEEDED_MESSAGE = 'A connection is needed for this. Connect to the internet and try again.';
 
 export interface Account {
   id: string;
@@ -15,14 +20,23 @@ export interface Account {
 
 interface SessionResponse {
   token: string;
+  accessExpiresAt?: string;
   refreshToken?: string;
+  refreshExpiresAt?: string;
   user: Account;
 }
 
 function storeSession(session: SessionResponse): Account {
   setToken(session.token);
   setRefreshToken(session.refreshToken ?? null);
+  setTokenExpiries(session.accessExpiresAt, session.refreshExpiresAt);
+  rememberAccount(session.user);
+  markAuthenticated();
   return session.user;
+}
+
+function requireConnection(): void {
+  if (!isOnline.value) throw new Error(CONNECTION_NEEDED_MESSAGE);
 }
 
 export interface ProfileChanges {
@@ -38,10 +52,16 @@ export const isVerified = (account: Account | null): boolean => !!account && acc
 export async function getCurrentAccount(): Promise<Account | null> {
   if (!getToken()) return null;
   try {
-    return await api<Account>('GET', '/api/auth/me');
+    const account = await api<Account>('GET', '/api/auth/me');
+    rememberAccount(account);
+    return account;
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) setToken(null);
-    return null;
+    if (e instanceof ApiError) {
+      if (e.status === 401) clearSession();
+      return null;
+    }
+    // Offline: keep using the last known account with cached data.
+    return cachedAccount<Account>();
   }
 }
 
@@ -52,10 +72,12 @@ export async function getCurrentUserId(): Promise<string | null> {
 }
 
 export async function signIn(email: string, password: string): Promise<Account> {
+  requireConnection();
   return storeSession(await api<SessionResponse>('POST', '/api/auth/signin', { email, password }));
 }
 
 export async function signUp(email: string, password: string, displayName: string, phone: string): Promise<Account> {
+  requireConnection();
   return storeSession(await api<SessionResponse>('POST', '/api/auth/signup', { email, password, displayName, phone }));
 }
 
@@ -92,14 +114,22 @@ export async function resetPassword(token: string, password: string): Promise<vo
   await api('POST', '/api/auth/reset-password', { token, password });
 }
 
+/** Deletes the account and all its data after confirmation with the password, then clears the local session. */
+export async function deleteAccount(password: string): Promise<void> {
+  requireConnection();
+  await api('DELETE', '/api/auth/me', { confirm: true, password });
+  clearSession();
+}
+
 /** Clears the local session; the server revokes the token when reachable (offline sign-out still succeeds). */
 export async function signOut(): Promise<void> {
   try {
-    if (getToken()) await api('POST', '/api/auth/signout', { refreshToken: getRefreshToken() ?? undefined });
+    if (getToken() || getRefreshToken()) {
+      await api('POST', '/api/auth/signout', { refreshToken: getRefreshToken() ?? undefined });
+    }
   } catch {
     // Offline or already revoked: the local token is cleared regardless.
   } finally {
-    setToken(null);
-    setRefreshToken(null);
+    clearSession();
   }
 }

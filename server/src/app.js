@@ -29,7 +29,9 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export const VERIFICATION_TTL_MS = 15 * 60 * 1000;
 export const RESET_TTL_MS = 30 * 60 * 1000;
+export const ACCESS_TTL_MS = 60 * 60 * 1000;
 export const REFRESH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const REFRESH_INVALID_MESSAGE = 'Session expired; please sign in again';
 export const RESEND_PER_MINUTE = 1;
 export const RESEND_PER_HOUR = 5;
 export const RESET_REQUESTED_MESSAGE = 'If an account exists for this email, a reset link has been sent';
@@ -330,14 +332,22 @@ export function createApp(db, options = {}) {
     });
   }
 
-  function issueSession(user) {
+  // Issues a 1-hour access token and an opaque 14-day refresh token (stored hashed).
+  // A rotated refresh token keeps the original 14-day expiry so the session cannot be extended forever.
+  function issueSession(user, refreshExpiresAt = clock() + REFRESH_TTL_MS) {
     const token = randomBytes(32).toString('hex');
-    run('insert into sessions (token, user_id) values (?, ?)', token, user.id);
+    const accessExpiresAt = clock() + ACCESS_TTL_MS;
+    run('insert into sessions (token, user_id, expires_at) values (?, ?, ?)', token, user.id, accessExpiresAt);
     const refreshToken = randomBytes(32).toString('hex');
-    const refreshExpiresAt = clock() + REFRESH_TTL_MS;
     run('insert into refresh_tokens (token_hash, user_id, session_token, expires_at) values (?, ?, ?, ?)',
       sha256(refreshToken), user.id, token, refreshExpiresAt);
-    return { token, refreshToken, refreshExpiresAt: new Date(refreshExpiresAt).toISOString(), user: accountDto(user) };
+    return {
+      token,
+      accessExpiresAt: new Date(accessExpiresAt).toISOString(),
+      refreshToken,
+      refreshExpiresAt: new Date(refreshExpiresAt).toISOString(),
+      user: accountDto(user),
+    };
   }
 
   function withTransaction(fn) {
@@ -409,15 +419,49 @@ export function createApp(db, options = {}) {
       return [200, issueSession(user)];
     }, false],
 
+    // Exchanges a refresh token for a new access token and a rotated refresh token. The old one stops
+    // working; presenting a revoked (reused) token is rejected and revokes the whole account's sessions.
+    ['POST', '/api/auth/refresh', ({ body }) => {
+      const r = one('select * from refresh_tokens where token_hash = ?', sha256(String(body.refreshToken ?? '')));
+      if (!r) throw new HttpError(401, REFRESH_INVALID_MESSAGE);
+      if (r.revoked) {
+        if (r.rotated) {
+          run('update refresh_tokens set revoked = 1 where user_id = ?', r.user_id);
+          run('delete from sessions where user_id = ?', r.user_id);
+        }
+        throw new HttpError(401, REFRESH_INVALID_MESSAGE);
+      }
+      if (r.expires_at <= clock()) throw new HttpError(401, REFRESH_INVALID_MESSAGE);
+      const user = one('select * from users where id = ?', r.user_id);
+      if (!user) throw new HttpError(401, REFRESH_INVALID_MESSAGE);
+      return [200, withTransaction(() => {
+        run('update refresh_tokens set revoked = 1, rotated = 1 where token_hash = ?', r.token_hash);
+        run('delete from sessions where token = ?', r.session_token);
+        return issueSession(user, r.expires_at);
+      })];
+    }, false],
+
     // Signing out revokes the session token and its refresh token; the client also clears them locally.
+    // Works with an expired access token as long as the refresh token is sent.
     ['POST', '/api/auth/signout', ({ token, body }) => {
       run('update refresh_tokens set revoked = 1 where session_token = ? or token_hash = ?',
         token, sha256(String(body.refreshToken ?? '')));
       run('delete from sessions where token = ?', token);
       return [204];
-    }, 'unverified'],
+    }, false],
 
     ['GET', '/api/auth/me', ({ user }) => [200, accountDto(user)], 'unverified'],
+
+    // Deleting the account needs the password as confirmation. Foreign keys cascade to sessions,
+    // refresh tokens, restaurants, orders, shares, share links and friendships.
+    ['DELETE', '/api/auth/me', ({ user, body }) => {
+      if (body.confirm !== true) throw new HttpError(400, 'Confirm that you want to delete your account');
+      if (typeof body.password !== 'string' || !verifyPassword(body.password, user.password_hash)) {
+        throw new HttpError(400, 'Password is incorrect');
+      }
+      withTransaction(() => run('delete from users where id = ?', user.id));
+      return [204];
+    }, 'unverified'],
 
     // Edit profile. Email and phone stay unique (one generic error). A new email must be confirmed
     // with a code before it replaces the old one. Changing the password needs the current one and
@@ -990,13 +1034,16 @@ export function createApp(db, options = {}) {
         const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
         let user = null;
         if (route.auth) {
-          user = token && one('select u.* from sessions s join users u on u.id = s.user_id where s.token = ?', token);
+          user = token && one(
+            'select u.* from sessions s join users u on u.id = s.user_id where s.token = ? and s.expires_at > ?',
+            token, clock(),
+          );
           if (!user) throw new HttpError(401, 'Not signed in');
           if (route.auth !== 'unverified' && !user.email_verified_at) {
             throw new HttpError(403, 'Email not verified');
           }
         }
-        const body = ['POST', 'PATCH'].includes(req.method) ? await readBody(req) : {};
+        const body = ['POST', 'PATCH', 'DELETE'].includes(req.method) ? await readBody(req) : {};
         const [status, payload] = route.handler({ user, token, params, query: url.searchParams, body });
         if (payload === undefined) return res.writeHead(status).end();
         res.writeHead(status, { 'Content-Type': 'application/json' });

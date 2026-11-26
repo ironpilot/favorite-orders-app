@@ -51,6 +51,15 @@
           </ion-item>
         </ion-list>
         <p
+          v-if="!isOnline"
+          data-testid="auth-offline"
+          class="ion-text-center"
+        >
+          <ion-text color="warning">
+            {{ CONNECTION_NEEDED_MESSAGE }}
+          </ion-text>
+        </p>
+        <p
           v-if="errorMessage"
           data-testid="auth-error"
           class="ion-text-center"
@@ -62,7 +71,7 @@
         <ion-button
           expand="block"
           type="submit"
-          :disabled="busy"
+          :disabled="busy || !isOnline"
           data-testid="auth-submit"
         >
           {{ isSignUp ? 'Sign up' : 'Sign in' }}
@@ -105,7 +114,8 @@ import {
   IonButton,
   IonText,
 } from '@ionic/vue';
-import { isVerified, signIn, signUp } from '@/services/auth';
+import { CONNECTION_NEEDED_MESSAGE, isVerified, signIn, signUp } from '@/services/auth';
+import { isOnline } from '@/services/session';
 
 const router = useRouter();
 const isSignUp = ref(false);

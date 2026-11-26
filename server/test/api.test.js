@@ -149,7 +149,8 @@ describe('email verification', () => {
   });
 
   it('limits resends to 1 per minute and 5 per hour', async () => {
-    const { token } = await signUpUnverified('resend@example.com');
+    const session = await signUpUnverified('resend@example.com');
+    let { token } = session;
     try {
       assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 429);
       for (let i = 1; i <= 4; i++) {
@@ -159,6 +160,9 @@ describe('email verification', () => {
       clockOffset = 6 * 61_000;
       assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 429);
       clockOffset = 61 * 60_000 + 61_000;
+      // The 1-hour access token has expired by now; refresh it first.
+      assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 401);
+      token = (await call('POST', '/api/auth/refresh', { body: { refreshToken: session.refreshToken } })).data.token;
       assert.equal((await call('POST', '/api/auth/resend-verification', { token })).status, 200);
     } finally {
       clockOffset = 0;
@@ -231,6 +235,89 @@ describe('refresh tokens', () => {
     const reset = lastMail('refreshreset@example.com').token;
     await call('POST', '/api/auth/reset-password', { body: { token: reset, password: 'newpass456' } });
     assert.equal(refreshRow(token).revoked, 1);
+  });
+
+  it('expires the access token after 1 hour and the refresh token after 2 weeks', async () => {
+    const { token, refreshToken, accessExpiresAt } = await signUp('ttl@example.com');
+    const minutes = (Date.parse(accessExpiresAt) - Date.now()) / 60_000;
+    assert.ok(minutes > 59.9 && minutes <= 60);
+    try {
+      clockOffset = 59 * 60_000;
+      assert.equal((await call('GET', '/api/auth/me', { token })).status, 200);
+      clockOffset = 61 * 60_000;
+      assert.equal((await call('GET', '/api/auth/me', { token })).status, 401);
+      clockOffset = 15 * 86_400_000;
+      assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken } })).status, 401);
+    } finally {
+      clockOffset = 0;
+    }
+  });
+
+  it('rotates the refresh token, rejects reuse, and keeps the original expiry', async () => {
+    const first = await signUp('rotate@example.com');
+    const res = await call('POST', '/api/auth/refresh', { body: { refreshToken: first.refreshToken } });
+    assert.equal(res.status, 200);
+    assert.notEqual(res.data.token, first.token);
+    assert.notEqual(res.data.refreshToken, first.refreshToken);
+    assert.equal(res.data.refreshExpiresAt, first.refreshExpiresAt);
+    assert.equal(res.data.user.email, 'rotate@example.com');
+    assert.equal((await call('GET', '/api/auth/me', { token: first.token })).status, 401);
+    assert.equal((await call('GET', '/api/auth/me', { token: res.data.token })).status, 200);
+    // Reusing the rotated-out token is rejected and revokes the account's sessions.
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: first.refreshToken } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: res.data.refreshToken } })).status, 401);
+    assert.equal((await call('GET', '/api/auth/me', { token: res.data.token })).status, 401);
+  });
+
+  it('rejects a revoked or unknown refresh token, and sign-out works with an expired access token', async () => {
+    const { token, refreshToken } = await signUp('revoked@example.com');
+    clockOffset = 2 * 3_600_000;
+    try {
+      assert.equal((await call('POST', '/api/auth/signout', { token, body: { refreshToken } })).status, 204);
+    } finally {
+      clockOffset = 0;
+    }
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: 'nope' } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: {} })).status, 401);
+  });
+
+  it('returns 401 for API calls without a valid access token', async () => {
+    for (const [method, path] of [['GET', '/api/restaurants'], ['GET', '/api/shared'], ['GET', '/api/friends'], ['GET', '/api/auth/me']]) {
+      assert.equal((await call(method, path)).status, 401, path);
+      assert.equal((await call(method, path, { token: 'bogus' })).status, 401, path);
+    }
+  });
+});
+
+describe('delete account', () => {
+  it('requires confirmation and the password', async () => {
+    const { token } = await signUp('del-confirm@example.com');
+    assert.equal((await call('DELETE', '/api/auth/me', { token, body: { password: 'secret123' } })).status, 400);
+    assert.equal((await call('DELETE', '/api/auth/me', { token, body: { confirm: true, password: 'wrong' } })).status, 400);
+    assert.equal((await call('GET', '/api/auth/me', { token })).status, 200);
+  });
+
+  it('removes all user data; friends lose shared orders and the user cannot sign in', async () => {
+    const a = await signUp('del-a@example.com');
+    const b = await signUp('del-b@example.com');
+    const req = (await call('POST', '/api/friends', { token: a.token, body: { userId: b.user.id } })).data;
+    await call('POST', `/api/friends/${req.id}/accept`, { token: b.token });
+    const o = await saveOrder(a.token, 'Doomed Place');
+    await call('POST', `/api/orders/${o.id}/shares`, { token: a.token, body: { userId: b.user.id } });
+    await call('POST', `/api/orders/${o.id}/links`, { token: a.token, body: {} });
+    assert.equal((await call('GET', '/api/shared', { token: b.token })).data.length, 1);
+
+    assert.equal((await call('DELETE', '/api/auth/me', { token: a.token, body: { confirm: true, password: 'secret123' } })).status, 204);
+    assert.deepEqual((await call('GET', '/api/shared', { token: b.token })).data, []);
+    assert.deepEqual((await call('GET', '/api/friends', { token: b.token })).data, []);
+    assert.equal((await call('GET', '/api/auth/me', { token: a.token })).status, 401);
+    assert.equal((await call('POST', '/api/auth/refresh', { body: { refreshToken: a.refreshToken } })).status, 401);
+    assert.equal((await call('POST', '/api/auth/signin', { body: { email: 'del-a@example.com', password: 'secret123' } })).status, 401);
+    for (const table of ['restaurants', 'orders', 'order_shares', 'share_links', 'sessions', 'refresh_tokens']) {
+      const col = { restaurants: 'owner_id', orders: 'owner_id', order_shares: 'shared_by', share_links: 'owner_id' }[table] ?? 'user_id';
+      assert.equal(db.prepare(`select count(*) as n from ${table} where ${col} = ?`).get(a.user.id).n, 0, table);
+    }
   });
 });
 
@@ -910,10 +997,10 @@ describe('share links', () => {
     const a = await signUp('lx-a@example.com');
     const b = await signUp('lx-b@example.com');
     const o = await saveOrder(a.token, 'Expiry Place');
-    const short = await createLink(a, o.id, 1);
+    const short = await createLink(a, o.id, 0.5);
     const other = await createLink(a, o.id);
     assert.equal((await open(b, other)).status, 200);
-    clockOffset = 2 * 3_600_000;
+    clockOffset = 45 * 60_000;
     try {
       const expired = await open(b, short);
       assert.equal(expired.status, 410);

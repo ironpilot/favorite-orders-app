@@ -151,6 +151,60 @@
       >
         Sign out
       </ion-button>
+
+      <ion-button
+        v-if="!confirmingDelete"
+        expand="block"
+        fill="clear"
+        color="danger"
+        :disabled="!isOnline"
+        data-testid="delete-account"
+        @click="confirmingDelete = true"
+      >
+        Delete account
+      </ion-button>
+      <div
+        v-else
+        data-testid="delete-confirm"
+      >
+        <p>
+          <ion-text color="danger">
+            This permanently deletes your account and all your orders, restaurants, shares and friendships.
+            Enter your password to confirm.
+          </ion-text>
+        </p>
+        <ion-list>
+          <ion-item>
+            <ion-input
+              v-model="deletePassword"
+              label="Password"
+              label-placement="stacked"
+              type="password"
+              autocomplete="current-password"
+              name="deletePassword"
+            />
+          </ion-item>
+        </ion-list>
+        <ion-button
+          expand="block"
+          color="danger"
+          :disabled="busy || !isOnline"
+          data-testid="delete-account-confirm"
+          @click="removeAccount"
+        >
+          Delete my account
+        </ion-button>
+        <ion-button
+          expand="block"
+          fill="clear"
+          color="medium"
+          :disabled="busy"
+          data-testid="delete-account-cancel"
+          @click="confirmingDelete = false; deletePassword = ''"
+        >
+          Keep my account
+        </ion-button>
+      </div>
     </ion-content>
   </ion-page>
 </template>
@@ -172,6 +226,7 @@ import {
 } from '@ionic/vue';
 import {
   cancelEmailChange,
+  deleteAccount,
   getCurrentAccount,
   resendEmailChange,
   signOut,
@@ -180,6 +235,7 @@ import {
   type Account,
   type ProfileChanges,
 } from '@/services/auth';
+import { isOnline } from '@/services/session';
 
 const router = useRouter();
 const account = ref<Account | null>(null);
@@ -192,6 +248,8 @@ const code = ref('');
 const busy = ref(false);
 const errorMessage = ref('');
 const infoMessage = ref('');
+const confirmingDelete = ref(false);
+const deletePassword = ref('');
 
 const changeExpiresLabel = computed(() => {
   const at = account.value?.pendingEmailExpiresAt;
@@ -249,6 +307,24 @@ async function confirmEmail() {
   }
   await run(() => verifyEmailChange(code.value.trim()), 'Your email has been changed.');
   if (!errorMessage.value) code.value = '';
+}
+
+async function removeAccount() {
+  errorMessage.value = '';
+  infoMessage.value = '';
+  if (!deletePassword.value) {
+    errorMessage.value = 'Enter your password to delete your account';
+    return;
+  }
+  busy.value = true;
+  try {
+    await deleteAccount(deletePassword.value);
+    await router.replace('/login');
+  } catch (e) {
+    errorMessage.value = e instanceof Error ? e.message : 'Something went wrong';
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function leave() {

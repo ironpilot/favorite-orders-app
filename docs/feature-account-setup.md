@@ -110,12 +110,12 @@ Each step is a usable increment that builds on the previous one. Each step has a
 | 2. Email verification | Complete |
 | 3. Sign out and forgot password | Complete |
 | 4. Edit profile | Complete |
-| 5. Delete account | Not started |
+| 5. Delete account | Complete |
 | 6. Share link sign-up and signed-in access | Not started |
 | 7. Offline behavior | Not started |
-| 8. Server access and refresh tokens | Not started |
-| 9. Client session storage, restore and refresh | Not started |
-| 10. Connectivity, offline banner and re-validation | Not started |
+| 8. Server access and refresh tokens | Complete |
+| 9. Client session storage, restore and refresh | Complete |
+| 10. Connectivity, offline banner and re-validation | Complete |
 | 11. Biometric unlock (CapacitorJS) | Not started |
 | 12. Native offline cache (SQLite) | Not started |
 | 13. Native polish: status bar, splash and keyboard | Not started |
@@ -190,7 +190,7 @@ Each step is a usable increment that builds on the previous one. Each step has a
 **Details:**
 - Confirmation, then removal of the account and all orders, restaurants, shares and friendships.
 
-**Status:** Not started.
+**Status:** Complete. `DELETE /api/auth/me` needs `{ confirm: true, password }`; deleting the user cascades to sessions, refresh tokens, restaurants, orders, shares, share links and friendships. Profile shows a Delete account button (disabled offline) that opens a password confirmation; success clears the local session and returns to sign-in.
 
 **Tests:**
 - Deletion requires confirmation.
@@ -231,7 +231,7 @@ Each step is a usable increment that builds on the previous one. Each step has a
 - Add `POST /auth/refresh`; revoke the refresh token on sign-out.
 - Reject every API call without a valid access token with 401, except sign-up, sign-in and refresh.
 
-**Status:** Not started.
+**Status:** Complete. Sessions carry a 1-hour `expires_at` (older rows without one are rejected); sign-in and sign-up return `accessExpiresAt` and `refreshExpiresAt`. `POST /api/auth/refresh` rotates the refresh token (keeping its original 14-day expiry); reusing a rotated-out token is rejected and revokes all the account's sessions. Sign-out also works with an expired access token when the refresh token is sent.
 
 **Tests:**
 - Access token expires after 1 hour; refresh token after 2 weeks.
@@ -249,7 +249,7 @@ Each step is a usable increment that builds on the previous one. Each step has a
 - 401 interceptor in `api.ts` with a single-flight refresh and one retry, then login.
 - Remember a share link opened while signed out and resume it after login or refresh.
 
-**Status:** Not started.
+**Status:** Complete. `client/src/lib/tokens.ts` stores both tokens with expiry times; `client/src/services/session.ts` owns `unauthenticated | authenticated | offline` and the expiry check, which the router guard runs before every route. `api.ts` retries a 401 once after a single-flight refresh; a rejected refresh clears the session and shows login. The last account is cached so the app keeps working offline. Share links remembered while signed out resume after login or refresh.
 
 **Tests:**
 - Valid session restored on reload; expired access token with valid refresh refreshes silently; both expired shows login.
@@ -260,12 +260,12 @@ Each step is a usable increment that builds on the previous one. Each step has a
 **Covers:** FR-A6, FR-A7, FR-A8, FR-A9
 
 **Details:**
-- Detect connectivity with `navigator.onLine` and `online`/`offline` events, confirmed by a failed request.
+- Detect connectivity with `@capacitor/network` (which uses `navigator.onLine` and `online`/`offline` events on the web), confirmed by a failed request.
 - Ionic `OfflineBanner` at the app shell shows "Operating offline" and the app keeps using cached data.
 - On reconnect and on app resume, run the same expiry check as startup: refresh, show login, or hide the banner.
 - Defer a failed refresh while offline without signing the user out.
 
-**Status:** Not started.
+**Status:** Complete. `client/src/services/connectivity.ts` follows `@capacitor/network` status changes; a network-level request failure marks the app offline and the next response marks it online. `OfflineBanner` in `App.vue` shows "Operating offline". Reconnect and app resume (`@capacitor/app` `appStateChange`) run the startup expiry check. Refreshes that fail offline are deferred without signing out. Offline, the login screen shows a connection-needed message and sign-in and sign-up are disabled.
 
 **Tests:**
 - Going offline shows the banner and cached data stay usable.

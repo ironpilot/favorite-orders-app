@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from '@ionic/vue-router';
 import type { RouteRecordRaw, Router, RouterHistory } from 'vue-router';
 import TabsPage from '@/views/TabsPage.vue';
 import { getCurrentAccount, isVerified } from '@/services/auth';
+import { checkSession } from '@/services/session';
 import { rememberPendingLink, takePendingLink } from '@/services/sharing';
 
 export const routes: RouteRecordRaw[] = [
@@ -42,7 +43,10 @@ export function buildRouter(history: RouterHistory = createWebHistory(import.met
     if (to.matched.some((r) => r.meta.public)) return true;
     const guestOnly = to.matched.some((r) => r.meta.guestOnly);
     const verification = to.matched.some((r) => r.meta.verification);
-    const account = await getCurrentAccount();
+    // The startup expiry check: a stored session is restored (refreshed silently if needed) before any
+    // route renders; with both tokens expired the session is cleared and login is shown.
+    const session = await checkSession();
+    const account = session === 'unauthenticated' ? null : await getCurrentAccount();
     const shareLink = to.matched.some((r) => r.meta.shareLink);
     if (!account) {
       if (shareLink) rememberPendingLink(String(to.params.token));

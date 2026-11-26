@@ -4,6 +4,7 @@ import App from './App.vue';
 import router from './router';
 import AppLogo from './components/AppLogo.vue';
 import { initNative } from './lib/native';
+import { startConnectivity } from './services/connectivity';
 
 import '@ionic/vue/css/core.css';
 import '@ionic/vue/css/normalize.css';
@@ -14,6 +15,8 @@ import '@ionic/vue/css/flex-utils.css';
 import '@ionic/vue/css/display.css';
 import './theme/variables.css';
 
+// Connectivity first so the startup session check knows whether it can refresh.
+void startConnectivity(router);
 const app = createApp(App).use(IonicVue).use(router);
 app.component('AppLogo', AppLogo);
 

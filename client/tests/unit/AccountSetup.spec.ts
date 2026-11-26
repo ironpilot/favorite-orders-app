@@ -46,6 +46,11 @@ vi.mock('@/lib/api', () => {
       });
       if (path === '/api/auth/me') {
         if (!state.token) throw new ApiError(401, 'Not signed in');
+        if (method === 'DELETE') {
+          if ((body as { password?: string }).password !== 'secret123') throw new ApiError(400, 'Password is incorrect');
+          state.token = null;
+          return undefined;
+        }
         if (method === 'PATCH') {
           const changes = body as { email?: string; phone?: string };
           if (changes.phone === '+15559999999') {
@@ -261,6 +266,47 @@ describe('edit profile', () => {
     await flushPromises();
     expect(state.calls).toContainEqual(['POST', '/api/auth/email-change/verify', { code: '123456' }]);
     expect(wrapper.find('[data-testid="email-change"]').exists()).toBe(false);
+  });
+});
+
+describe('delete account', () => {
+  async function mountProfile() {
+    state.token = 't';
+    state.refreshToken = 'r';
+    state.verified = true;
+    const router = buildRouter(createMemoryHistory());
+    await router.push('/tabs/profile');
+    const wrapper = mount(ProfilePage, { global: { plugins: [router] } });
+    await flushPromises();
+    return { router, wrapper };
+  }
+  const fields = (wrapper: { vm: unknown }) => wrapper.vm as unknown as Record<string, string>;
+
+  it('requires confirmation with the password before deleting', async () => {
+    const { router, wrapper } = await mountProfile();
+    expect(wrapper.find('[data-testid="delete-account-confirm"]').exists()).toBe(false);
+    await wrapper.find('[data-testid="delete-account"]').trigger('click');
+    await wrapper.find('[data-testid="delete-account-confirm"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="profile-error"]').text()).toContain('password');
+    expect(state.calls.some(([m]) => m === 'DELETE')).toBe(false);
+    Object.assign(fields(wrapper), { deletePassword: 'wrong' });
+    await wrapper.find('[data-testid="delete-account-confirm"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="profile-error"]').text()).toContain('incorrect');
+    expect(router.currentRoute.value.path).toBe('/tabs/profile');
+  });
+
+  it('deletes the account, clears the session and returns to sign-in', async () => {
+    const { router, wrapper } = await mountProfile();
+    await wrapper.find('[data-testid="delete-account"]').trigger('click');
+    Object.assign(fields(wrapper), { deletePassword: 'secret123' });
+    await wrapper.find('[data-testid="delete-account-confirm"]').trigger('click');
+    await flushPromises();
+    expect(state.calls).toContainEqual(['DELETE', '/api/auth/me', { confirm: true, password: 'secret123' }]);
+    expect(state.token).toBeNull();
+    expect(state.refreshToken).toBeNull();
+    expect(router.currentRoute.value.path).toBe('/login');
   });
 });
 
