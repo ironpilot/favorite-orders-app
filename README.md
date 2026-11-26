@@ -64,6 +64,19 @@ npm run preview  # serve the production build locally
 
 The server needs no build step.
 
+## Native builds (Capacitor)
+
+The client is wrapped with CapacitorJS (`client/capacitor.config.ts`, app id `com.favoriteorders.app`). The native projects are in `client/android` and `client/ios`.
+
+```bash
+cd client
+npm run cap:sync     # build the web app and copy it into the native projects
+npm run cap:android  # sync, then open Android Studio
+npm run cap:ios      # sync, then open Xcode (macOS only)
+```
+
+Android builds need Android Studio and a JDK. iOS builds need macOS and Xcode. On a device or emulator, set `VITE_API_URL` to an address the device can reach before you build (for example `http://10.0.2.2:3000` on the Android emulator).
+
 ## Test, lint and type-check
 
 ```bash
