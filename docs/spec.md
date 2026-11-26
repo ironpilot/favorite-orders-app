@@ -30,7 +30,10 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - No order history or versioning at this time; only the last-updated time is kept.
 - Shared orders from friends appear in a separate Shared tab, not in the restaurant list.
 - Add, remove, and update the favorite orders at each restaurant.
-- Text our order to a friend from a single button click.
+- Text our order to a friend from a single button click, choosing the contact with the OS contact picker; copy an order or share link to the clipboard.
+- Invite friends by picking a contact and sending an invite link (no contact data is uploaded to the server).
+- Show a share link as a QR code and scan QR codes in the app.
+- Optional biometric unlock on resume (opt-in, falls back to device passcode, then password).
 - Account creation and user sign-up experience.
 - Authentication gate: no application functionality or API call is available until the user has authenticated. On first startup the app shows only sign-in or registration; share links also require sign-in and resume after it.
 - Sessions: the access token lasts 1 hour and the refresh token 2 weeks. A stored session is restored on app load; an expired access token is silently refreshed; if both have expired or the refresh is rejected, the user is shown sign-in. Resume from the background applies the same check.
@@ -70,6 +73,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Must use Ionic as the UI framework.
 - Must be designed mobile first.
 - Must use Vue with Ionic Vue.
+- Must use CapacitorJS for mobile native features (e.g. SMS/text composer, push notifications, network status, app lifecycle/resume, secure storage, share sheet, deep links).
 - Must use a Node.js server with a SQLite database as the backend.
 - No third-party places/restaurant API.
 - No "Add a restaurant" buttons; restaurants are only added when a user creates an order.
@@ -96,7 +100,7 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - UI framework: Ionic (mobile-first components and navigation).
 - Frontend: Vue (Ionic Vue) with TypeScript.
 - Dialogs: `ion-alert` is the standard component for confirmations and success/failure messages.
-- Native layer: Capacitor for iOS and Android builds, plus a PWA.
+- Native layer: CapacitorJS is required for iOS and Android builds and for all mobile native features (via Capacitor plugins, with web fallbacks for the PWA), plus a PWA.
 - Backend: Node.js HTTP/JSON API server (`server/`) using the built-in `node:http` and `node:sqlite` modules (Node 22.13+), with no external runtime dependencies.
 - Database: a single SQLite file (default `server/data/app.db`, configurable via `DATABASE_PATH`) with tables for users, sessions, restaurants (administrator-owned with no user owner, or user-created), orders (belonging to a restaurant), order items (belonging to an order, with a quantity defaulting to 1), order item customizations (remove, add, or substitute), a common toppings list, friendships, and order shares.
 - Auth: email/password accounts with scrypt-hashed passwords; sign-in returns a 1-hour access token (sent in the `Authorization` header) and an opaque 14-day refresh token stored hashed server-side and rotated on each use via `POST /auth/refresh`; sign-out revokes it. The client stores both tokens with their expiry, retries once after a 401 with a single-flight refresh, and a central auth service gates routes.
@@ -107,8 +111,9 @@ Favorite Order App is a mobile-first app for sharing our favorite restaurant ord
 - Friends: a friends table with pending/accepted status gates direct sharing; share links use separate link records with expiry and opener tracking.
 - Restaurants: administrator-owned (pre-populated) or user-created free-text entries, with no external API; the add-order field auto-fills from both. Different spellings are kept as separate entries (a user-created restaurant may share a name with an administrator-owned one) and restaurants persist independently of their orders.
 - Toppings: an administrator-maintained list of common toppings served to the client for customization auto-fill; suggestions only, free text allowed.
-- Offline: read-only local cache of saved and shared orders; writes require connectivity.
-- Text an order: native SMS composer via the `sms:` scheme or Capacitor.
+- Offline: read-only local cache of saved and shared orders in SQLite (`@capacitor-community/sqlite`, IndexedDB on the PWA), wiped on sign-out and not encrypted in v1; writes require connectivity.
+- Native polish: status bar, splash screen and keyboard plugins follow the system light/dark theme.
+- Text an order: native SMS composer via a CapacitorJS plugin (with the `sms:` scheme as the PWA/web fallback).
 
 ## UI/UX Overview
 - Bottom tab or menu navigation suited to one-handed mobile use.

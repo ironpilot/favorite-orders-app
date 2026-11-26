@@ -95,6 +95,11 @@ A simple, phone-friendly account experience so people can sign up, verify their 
 ### Open Questions
 None at this time.
 
+### Resolved Decisions
+- Biometric unlock and secure storage of tokens use `capacitor-native-biometric`.
+- The existing cache is migrated once at startup to SQLite.
+- SQLCipher encryption of the cache is deferred and not planned.
+
 ## Implementation Steps
 
 Each step is a usable increment that builds on the previous one. Each step has a **Status** line: `Complete`, `Partial` (with what is done and what remains), or `Not started`. Status last reviewed 2026-11-24 against the code in `client/` and `server/`.
@@ -111,6 +116,9 @@ Each step is a usable increment that builds on the previous one. Each step has a
 | 8. Server access and refresh tokens | Not started |
 | 9. Client session storage, restore and refresh | Not started |
 | 10. Connectivity, offline banner and re-validation | Not started |
+| 11. Biometric unlock (CapacitorJS) | Not started |
+| 12. Native offline cache (SQLite) | Not started |
+| 13. Native polish: status bar, splash and keyboard | Not started |
 
 ### Step 1: Sign-up and sign-in basics
 **Covers:** FR1, FR2, FR3, FR4, FR8, FR13, FR19
@@ -263,6 +271,63 @@ Each step is a usable increment that builds on the previous one. Each step has a
 - Going offline shows the banner and cached data stay usable.
 - Reconnect with valid tokens hides the banner; expired access token refreshes; both expired shows login.
 - Offline user with no session sees login with a connection-needed message.
+
+### Step 11: Biometric unlock (CapacitorJS)
+**Covers:** FR-A3, FR-A9 (extension)
+
+**Details:**
+- Opt-in: off by default; the user enables it in Profile after signing in, and it requires a connection to enable. Uses a community biometric plugin (Face ID, Touch ID, fingerprint) with the tokens kept in Keychain/Keystore secure storage.
+- When enabled, resuming from the background after a configurable time (default 1 minute) and cold start require biometrics while the refresh token is valid; no full sign-in is needed.
+- Fallback order: biometrics, then device passcode, then email and password sign-in. Failing or cancelling stays on a lock screen with the session intact; signing in with a password or signing out clears the lock.
+- Expired refresh token, sign-out, and account deletion always disable biometric unlock and clear the stored secret. Works offline (unlocks cached data); the expiry check runs on reconnect.
+- Not available on the PWA; the setting is hidden there.
+
+**Status:** Not started.
+
+**Tests:**
+- The setting is hidden on the PWA and on devices with no biometrics or passcode.
+- With it enabled, resume after the timeout shows the lock screen; success restores the session without sign-in.
+- Biometric failure falls back to the device passcode and then to password sign-in.
+- An expired refresh token or sign-out removes the stored secret and the setting.
+- Offline unlock shows cached data and the offline banner.
+
+### Step 12: Native offline cache (SQLite)
+**Covers:** Offline support
+
+**Details:**
+- Replace the in-memory or web storage cache of saved and shared orders and restaurants with `@capacitor-community/sqlite` on iOS and Android, so the cache survives OS storage eviction; the PWA falls back to IndexedDB through the same cache interface.
+- Create a `client/src/services/cache/` layer with one interface for restaurants, orders, shared orders, and friends, plus a one-time migration from the existing cache.
+- Refresh on entry and pull-to-refresh write through to the cache; reads while offline use it. Search and sort run on the cached rows.
+- Wipe the cache on sign-out, account deletion, and when a different user signs in. The cache is not encrypted at rest in v1.
+- Cache stays read-only offline, as in the existing offline rules.
+
+**Status:** Not started.
+
+**Tests:**
+- Cached restaurants, orders, and shared orders are viewable offline after an app restart.
+- The existing cache data is migrated once with nothing lost.
+- The cache is wiped on sign-out, account deletion, and user switch.
+- A failed refresh keeps the cached content and shows the error message.
+- The PWA fallback passes the same cache interface tests.
+
+### Step 13: Native polish: status bar, splash and keyboard
+**Covers:** FR19, platforms
+
+**Details:**
+- Add `@capacitor/status-bar`, `@capacitor/splash-screen`, and `@capacitor/keyboard`, configured in `capacitor.config`.
+- Status bar and splash screen follow the system light or dark theme and the Ionic theme variables.
+- Respect safe areas on notched devices, and keep the offline banner and tab bar clear of them.
+- Keyboard: resize so the add-order autofill form, suggestions, and Save button stay visible; add an accessory bar with a Done button on iOS, and scroll the focused field into view.
+- Hide the splash screen after the session restore completes (Step 9), not on a fixed timer.
+
+**Status:** Not started.
+
+**Tests:**
+- Status bar style changes with the system theme on iOS and Android.
+- The splash screen hides only after the session restore finishes.
+- The add-order form stays usable, with the focused field and suggestions visible, with the keyboard open.
+- Safe areas are respected on notched devices.
+- The PWA ignores these plugins without errors.
 
 ## Implementation Status
 

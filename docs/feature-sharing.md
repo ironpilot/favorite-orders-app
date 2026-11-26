@@ -59,6 +59,13 @@ Friends and Sharing lets users connect with friends and family through friend re
 - If the opener is already a friend of the owner, no friend prompt is shown.
 - Like other shared orders, link-shared orders show the owner's latest version and disappear if the owner deletes the order.
 
+### Invite friends and QR share links (CapacitorJS)
+- Invite by contact: from the Friends tab the user picks one contact with the system contact picker and sends an invite link through the share sheet (`@capacitor/share`) or SMS. No contact data is uploaded or matched on the server.
+- The invite link is a deep link to the app store or PWA; after sign-up the new user can find the inviter by email or phone as usual. An invite does not create a friendship by itself.
+- Copy link: the share-link panel has a "Copy link" button (`@capacitor/clipboard`, `navigator.clipboard` on the PWA); the order message copy lives in `feature-order-texting.md`.
+- QR share links: the owner can show a share link as a QR code in the sharing-options modal. A user can scan a QR code in the app with a barcode-scanner plugin (camera permission requested on first use); the scanned link opens through the normal link flow (sign-in, read-only access, friend prompt). The OS camera app can also open the link as a deep link.
+- QR codes carry only the link; expiry, disabling, and opener removal apply unchanged.
+
 ### Receiving and browsing shared orders
 - Shared orders appear in a separate Shared tab, not in the restaurant list.
 - The Shared tab shows shared orders organized by restaurant or person.
@@ -82,9 +89,12 @@ Friends and Sharing lets users connect with friends and family through friend re
 - Managing restaurants, toppings, or order editing.
 
 ### Open questions
-- None currently.
+- Minimum iOS and Android versions required by `@capacitor-mlkit/barcode-scanning`.
 
 ### Resolved decisions
+- QR scanning uses `@capacitor-mlkit/barcode-scanning`.
+- The invite link is a generic app link with no inviter id.
+- Invites are not rate limited and invited contacts are not tracked.
 - Friend search is by email or phone only.
 - Declined requests are silently removed; senders can cancel pending requests.
 - Unfriending revokes access to shared orders; saved copies remain.
@@ -222,6 +232,36 @@ Done when the open-link-without-app path works and offline and error behavior is
 - A failed refresh keeps previous content and shows an error on the friends and Shared lists.
 - An offline refresh keeps cached data and shows a connection-needed message.
 
+### Step 8: Invite friends from contacts
+- Add an "Invite" action in the Friends tab that opens the system contact picker (single contact) via a CapacitorJS plugin.
+- Build a generic invite message and link, and send it through `@capacitor/share` or the `sms:` composer; the PWA falls back to the `sms:` scheme and copy.
+- Do not upload contacts or match them on the server.
+- Review focus: no bulk contacts permission; invite does not create a friendship.
+
+Done when a user can invite a contact by link without any contact data reaching the server.
+
+#### Tests
+- The Invite action opens the system picker and returns one contact only.
+- The invite message and link are shared through the share sheet or SMS.
+- No API call sends contact data.
+- Cancelling the picker or share sheet changes nothing.
+- The PWA fallback copies the invite link.
+
+### Step 9: Copy link and QR share links
+- Add "Copy link" and a QR code of the share link to the sharing-options modal (QR generated on the client).
+- Add a "Scan QR" action that uses a barcode-scanner plugin, requests the camera permission on first use, and routes the scanned link through the existing `/link/:token` flow.
+- Handle denied camera permission, non-app QR codes, and expired or disabled links with `ion-alert` messages; the PWA falls back to camera-less manual link paste.
+- Review focus: scanned links behave exactly like opened links.
+
+Done when a link can be copied, shown as QR, and opened by scanning on a second device.
+
+#### Tests
+- The modal shows a QR code matching the generated link and a working Copy link button.
+- Scanning the QR opens the link flow, including sign-in resume and the friend prompt for non-friends.
+- A non-app QR code or an invalid or expired link shows an `ion-alert`.
+- Denied camera permission shows an `ion-alert` and does not break sharing.
+- Disabling the link makes the QR stop working.
+
 ## Implementation Status
 
 Tracks progress of each implementation step. Update the status, date, and notes as work proceeds.
@@ -237,3 +277,5 @@ Status values: Not started, In progress, In review, Done, Blocked.
 | 5 | Share links (core) | In review | Yes | "Share via link" in the sharing-options modal (expiry 1/7/30 days or none); `/link/:token` opens the link (remembered through sign-in/sign-up) and adds it to the Shared tab via `order_shares.link_id`; owner sees openers and can disable a link (which also removes access gained through it); expired/disabled links show "This link is no longer valid" (2026-11-25) |
 | 6 | Share link friend flow and access control | In review | Yes | Non-friend openers (no existing friendship or pending request) get an `ion-alert` friend prompt; owner declining removes link-shared orders from the opener; owner can remove individual openers (they cannot reopen the link); unfriending revokes link access (2026-11-25) |
 | 7 | Link handoff for users without the app, and offline polish | Not started | No | |
+| 8 | Invite friends from contacts | Not started | No | |
+| 9 | Copy link and QR share links | Not started | No | |
