@@ -68,6 +68,8 @@ The server needs no build step.
 
 The client is wrapped with CapacitorJS (`client/capacitor.config.ts`, app id `com.favoriteorders.app`). The native projects are in `client/android` and `client/ios`.
 
+App icons and splash screens are built from `client/src/assets/logo.svg` (the sign) and `client/src/assets/checkerboard.svg` (the background). Run `npm run assets` in `client` to rebuild `client/assets/*.png` and every Android and iOS size. Dark mode gets a darker checkerboard splash screen.
+
 ```bash
 cd client
 npm run cap:sync     # build the web app and copy it into the native projects

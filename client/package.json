@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "vue-tsc --noEmit",
+    "assets": "node scripts/generate-app-assets.mjs && capacitor-assets generate --android --ios --iconBackgroundColor \"#ffffff\" --iconBackgroundColorDark \"#1c1d21\" --splashBackgroundColor \"#ffffff\" --splashBackgroundColorDark \"#1c1d21\"",
     "cap:sync": "npm run build && cap sync",
     "cap:android": "npm run cap:sync && cap open android",
     "cap:ios": "npm run cap:sync && cap open ios"
