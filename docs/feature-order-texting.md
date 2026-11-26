@@ -133,9 +133,9 @@ Update this section as work progresses. Status values: Not started, In progress,
 
 | Step | Name | Status | Notes |
 |------|------|--------|-------|
-| 1 | Order message builder | Not started | |
-| 2 | Text button and notes choice | Not started | |
-| 3 | Contact choice and native composer | Not started | |
-| 4 | Fallbacks and error handling | Not started | |
-| 5 | System contact picker and clipboard (CapacitorJS) | Not started | |
+| 1 | Order message builder | In review | `client/src/services/orderMessage.ts` |
+| 2 | Text button and notes choice | In review | Text button and notes `ion-alert` in `OrderDetailPage.vue` |
+| 3 | Contact choice and native composer | In review | `client/src/services/native/texting.ts`: `sms:` composer addressed to the picked contact |
+| 4 | Fallbacks and error handling | In review | Copy fallback without a text handler; `ion-alert` for denied access, no phone number, prepare/send/copy failures |
+| 5 | System contact picker and clipboard (CapacitorJS) | In review | `@capacitor-community/contacts` `pickContact` (native), Web Contact Picker or typed number on the PWA; `client/src/services/native/clipboard.ts` (`@capacitor/clipboard`, `navigator.clipboard` fallback); "Copy order" button |
 | 6 | Polish and verification | Not started | |

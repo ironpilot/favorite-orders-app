@@ -82,6 +82,57 @@
           />
           Share
         </ion-button>
+        <ion-button
+          size="small"
+          expand="block"
+          fill="outline"
+          data-testid="text-order"
+          @click="textOrder"
+        >
+          <ion-icon
+            slot="start"
+            :icon="chatbubbleOutline"
+          />
+          Text
+        </ion-button>
+        <ion-button
+          size="small"
+          expand="block"
+          fill="outline"
+          data-testid="copy-order"
+          @click="copyOrder"
+        >
+          <ion-icon
+            slot="start"
+            :icon="copyOutline"
+          />
+          Copy order
+        </ion-button>
+        <ion-alert
+          :is-open="textAlert.open"
+          :header="textAlert.header"
+          :message="textAlert.message"
+          :buttons="textAlert.buttons"
+          data-testid="text-alert"
+          @did-dismiss="textAlert.open = false"
+        />
+        <ion-alert
+          :is-open="notesPrompt"
+          header="Include notes?"
+          message="Add this order's notes to the text message?"
+          :buttons="notesAlertButtons"
+          data-testid="notes-prompt"
+          @did-dismiss="notesPrompt = false"
+        />
+        <ion-alert
+          :is-open="numberPrompt"
+          header="Text order"
+          message="Enter the phone number to text."
+          :inputs="numberAlertInputs"
+          :buttons="numberAlertButtons"
+          data-testid="number-prompt"
+          @did-dismiss="numberPrompt = false"
+        />
         <ion-modal
           :is-open="picking"
           :keep-contents-mounted="true"
@@ -377,11 +428,12 @@ import {
   IonSelectOption,
   onIonViewWillEnter,
 } from '@ionic/vue';
-import {shareOutline, trashOutline} from 'ionicons/icons';
+import {chatbubbleOutline, copyOutline, shareOutline, trashOutline} from 'ionicons/icons';
 import { useRoute, useRouter } from 'vue-router';
 import {
   deleteOrder,
   fetchOrder,
+  fetchRestaurant,
   formatCustomization,
   onOrderUpdated,
   orderLabel,
@@ -403,6 +455,9 @@ import {
   type OrderShare,
   type ShareLink,
 } from '@/services/sharing';
+import { buildOrderMessage } from '@/services/orderMessage';
+import { canText, openComposer, pickContact } from '@/services/native/texting';
+import { copyText } from '@/services/native/clipboard';
 
 const props = defineProps<{ id?: string; orderId?: string }>();
 const route = useRoute();
@@ -430,6 +485,32 @@ const newLinkUrl = ref('');
 /** Collapsed by default; the accordion's own chevron shows open or closed. */
 const sharedOpen = ref(false);
 const toast = reactive({ open: false, message: '', color: 'success' as 'success' | 'warning' | 'danger' });
+
+const restaurantName = ref('');
+const notesPrompt = ref(false);
+const numberPrompt = ref(false);
+let pendingMessage = '';
+/** What the notes prompt continues with: texting or the "Copy order" button. */
+let notesAction: 'text' | 'copy' = 'text';
+const afterNotes = (includeNotes: boolean) => {
+  void (notesAction === 'copy' ? copyMessage(includeNotes) : continueText(includeNotes));
+};
+const notesAlertButtons = [
+  { text: 'Cancel', role: 'cancel' },
+  { text: 'No', handler: () => afterNotes(false) },
+  { text: 'Include', handler: () => afterNotes(true) },
+];
+type AlertButton = { text: string; role?: string; handler?: () => void };
+const textAlert = reactive({ open: false, header: '', message: '', buttons: [] as AlertButton[] });
+function showTextAlert(header: string, message: string, buttons: AlertButton[] = [{ text: 'OK', role: 'cancel' }]) {
+  Object.assign(textAlert, { open: true, header, message, buttons });
+}
+const CANNOT_SEND = 'The message cannot be sent.';
+const numberAlertInputs = [{ name: 'phone', type: 'tel' as const, placeholder: 'Phone number' }];
+const numberAlertButtons = [
+  { text: 'Cancel', role: 'cancel' },
+  { text: 'Text', handler: (data: { phone?: string }) => sendTo(data?.phone ?? '') },
+];
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -499,11 +580,100 @@ async function removeOpener(linkId: string, userId: string) {
   }
 }
 
+async function loadRestaurantName() {
+  try {
+    restaurantName.value = (await fetchRestaurant(restaurantId))?.name ?? restaurantName.value;
+  } catch {
+    // Keep the name loaded before; the message still describes the order.
+  }
+}
+
+/** Text an Order: ask about notes (only when there are any), then pick a contact. Works offline; never changes the order. */
+function textOrder() {
+  startWithNotes('text');
+}
+
+/** "Copy order": same notes choice, then copies the prepared message. */
+function copyOrder() {
+  startWithNotes('copy');
+}
+
+function startWithNotes(action: 'text' | 'copy') {
+  if (!order.value) return;
+  notesAction = action;
+  if (order.value.notes?.trim()) notesPrompt.value = true;
+  else afterNotes(false);
+}
+
+/** Builds the message, or shows an alert and returns null when it cannot be prepared. */
+function prepare(includeNotes: boolean): string | null {
+  try {
+    if (!order.value) throw new Error('No order');
+    return buildOrderMessage(order.value, restaurantName.value, { includeNotes });
+  } catch {
+    showTextAlert('Text order', 'The message could not be prepared.');
+    return null;
+  }
+}
+
+async function copyMessage(includeNotes: boolean) {
+  const message = prepare(includeNotes);
+  if (message !== null) await copyPrepared(message);
+}
+
+async function copyPrepared(message: string) {
+  if (await copyText(message)) showTextAlert('Copied', 'The order was copied to the clipboard.');
+  else showTextAlert('Copy order', 'The order could not be copied.');
+}
+
+async function continueText(includeNotes: boolean) {
+  const message = prepare(includeNotes);
+  if (message === null) return;
+  pendingMessage = message;
+  if (!canText()) {
+    showTextAlert('Text order', 'This device cannot send text messages. Copy the order instead?', [
+      { text: 'Cancel', role: 'cancel' },
+      { text: 'Copy', handler: () => { void copyPrepared(message); } },
+    ]);
+    return;
+  }
+  let picked;
+  try {
+    picked = await pickContact();
+  } catch {
+    showTextAlert('Text order', CANNOT_SEND);
+    return;
+  }
+  if (picked === 'unsupported') numberPrompt.value = true;
+  else if (picked === 'denied') showTextAlert('Contacts access denied', `${CANNOT_SEND} Allow contacts access to text an order.`);
+  else if (picked === 'no-phone') {
+    showTextAlert('No phone number', 'That contact has no phone number. Pick another contact.', [
+      { text: 'Cancel', role: 'cancel' },
+      { text: 'Pick another', handler: () => { void continueText(includeNotes); } },
+    ]);
+  } else if (picked) compose(picked.phone, message);
+}
+
+function compose(phone: string, message: string) {
+  try {
+    openComposer(phone, message);
+  } catch {
+    showTextAlert('Text order', CANNOT_SEND);
+  }
+}
+
+/** Returns false to keep the number prompt open when no number was entered. */
+function sendTo(phone: string): boolean {
+  if (!phone.trim() || !pendingMessage) return false;
+  compose(phone.trim(), pendingMessage);
+  return true;
+}
+
 async function load() {
   errorMessage.value = '';
   try {
     order.value = await fetchOrder(orderId);
-    await loadShares();
+    await Promise.all([loadShares(), loadRestaurantName()]);
   } catch (e) {
     errorMessage.value = e instanceof Error ? e.message : 'Could not load order';
   } finally {
@@ -618,6 +788,8 @@ defineExpose({
   order, load, makeDefault, remove, share, confirmShare, unshare, toggle, selected, picking, toast, sharedOpen,
   links, linkExpiry, newLinkUrl, createLink, disableLink, removeOpener,
   confirmingDelete, deleteAlertButtons,
+  textOrder, continueText, sendTo, notesPrompt, numberPrompt, notesAlertButtons, numberAlertButtons, restaurantName,
+  copyOrder, textAlert,
 });
 </script>
 
